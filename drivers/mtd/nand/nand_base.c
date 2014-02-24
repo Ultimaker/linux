@@ -3996,6 +3996,13 @@ ident_done:
 	if (mtd->writesize > 512 && chip->cmdfunc == nand_command)
 		chip->cmdfunc = nand_command_lp;
 
+	if (nand_manuf_ids[maf_idx].init) {
+		int err;
+		err = nand_manuf_ids[maf_idx].init(mtd, id_data);
+		if (err)
+			return ERR_PTR(err);
+	}
+
 	print_nand_chip_info(*maf_id, *dev_id, id_data);
 
 	if (chip->onfi_version)
