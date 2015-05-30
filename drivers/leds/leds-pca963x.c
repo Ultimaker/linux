@@ -399,6 +399,9 @@ pca963x_dt_init(struct i2c_client *client, struct pca963x_chipdef *chip)
 	else
 		pdata->outdrv = PCA963X_OPEN_DRAIN;
 
+	/* default to normal output unless inverted output is specified */
+	pdata->inverted_out = of_property_read_bool(np, "nxp,inverted-out");
+
 	/* default to software blinking unless hardware blinking is specified */
 	if (of_property_read_bool(np, "nxp,hw-blink"))
 		pdata->blink_type = PCA963X_HW_BLINK;
@@ -508,14 +511,17 @@ static int pca963x_probe(struct i2c_client *client,
 	i2c_smbus_write_byte_data(client, PCA963X_MODE1, 0x00);
 
 	if (pdata) {
+		u8 mode2;
+
+		mode2 = PCA963X_MODE2_OUTNE_OUTDRV;
 		/* Configure output: open-drain or totem pole (push-pull) */
-		if (pdata->outdrv == PCA963X_OPEN_DRAIN)
-			i2c_smbus_write_byte_data(client, PCA963X_MODE2,
-					PCA963X_MODE2_OUTNE_OUTDRV);
-		else
-			i2c_smbus_write_byte_data(client, PCA963X_MODE2,
-					PCA963X_MODE2_OUTNE_OUTDRV |
-					PCA963X_MODE2_OUTDRV_TOTEMPOLE);
+		if (pdata->outdrv == PCA963X_TOTEM_POLE)
+			mode2 |= PCA963X_MODE2_OUTDRV_TOTEMPOLE;
+		/* Configure output: inverted output */
+		if (pdata->inverted_out)
+			mode2 |= PCA963X_MODE2_INVRT;
+
+		i2c_smbus_write_byte_data(client, PCA963X_MODE2, mode2);
 	}
 
 	return 0;

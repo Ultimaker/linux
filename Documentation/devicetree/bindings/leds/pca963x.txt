@@ -6,6 +6,7 @@ Required properties:
 Optional properties:
 - nxp,totem-pole : use totem pole (push-pull) instead of open-drain (pca9632 defaults
   to open-drain, newer chips to totem pole)
+- nxp,inverted-out : the connected leds are active-low, default to active-high
 - nxp,hw-blink : use hardware blinking instead of software blinking
 
 Each led is represented as a sub-node of the nxp,pca963x device.
