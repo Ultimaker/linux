@@ -79,6 +79,13 @@
 	};
 };
 
+&codec {
+        routing =
+                "Headphone Jack", "HP Left",
+                "Headphone Jack", "HP Right";
+        status = "okay";
+};
+
 &ahci {
 	target-supply = <&reg_ahci_5v>;
 	status = "okay";
