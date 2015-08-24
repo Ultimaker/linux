@@ -570,24 +570,31 @@ static int sunxi_nfc_hw_ecc_read_page(struct mtd_info *mtd,
 		memcpy_fromio(buf + (i * ecc->size),
 			      nfc->regs + NFC_RAM0_BASE, ecc->size);
 
+		chip->cmdfunc(mtd, NAND_CMD_RNDOUT, offset, -1);
+
+		ret = sunxi_nfc_wait_cmd_fifo_empty(nfc);
+		if (ret)
+			return ret;
+
+		offset -= mtd->writesize;
+		chip->read_buf(mtd, chip->oob_poi + offset,
+			      ecc->bytes + 4);
+
 		if (readl(nfc->regs + NFC_REG_ECC_ST) & NFC_ECC_ERR(0)) {
-			mtd->ecc_stats.failed++;
+			ret = nand_check_erased_ecc_chunk(buf + (i * ecc->size),
+					ecc->size, chip->oob_poi + offset,
+					ecc->bytes + ecc->prepad,
+					NULL, 0,ecc->strength);
 		} else {
 			tmp = readl(nfc->regs + NFC_REG_ECC_ERR_CNT(0));
-			mtd->ecc_stats.corrected += NFC_ECC_ERR_CNT(0, tmp);
-			max_bitflips = max_t(unsigned int, max_bitflips, tmp);
+			ret = NFC_ECC_ERR_CNT(0, tmp);
 		}
 
-		if (oob_required) {
-			chip->cmdfunc(mtd, NAND_CMD_RNDOUT, offset, -1);
-
-			ret = sunxi_nfc_wait_cmd_fifo_empty(nfc);
-			if (ret)
-				return ret;
-
-			offset -= mtd->writesize;
-			chip->read_buf(mtd, chip->oob_poi + offset,
-				      ecc->bytes + 4);
+		if (ret < 0) {
+			mtd->ecc_stats.failed++;
+		} else {
+			mtd->ecc_stats.corrected += ret;
+			max_bitflips = max_t(unsigned int, max_bitflips, ret);
 		}
 	}
 
@@ -717,24 +724,30 @@ static int sunxi_nfc_hw_syndrome_ecc_read_page(struct mtd_info *mtd,
 			return ret;
 
 		memcpy_fromio(buf, nfc->regs + NFC_RAM0_BASE, ecc->size);
-		buf += ecc->size;
 		offset += ecc->size;
 
+		chip->cmdfunc(mtd, NAND_CMD_RNDOUT, offset, -1);
+		chip->read_buf(mtd, oob, ecc->bytes + ecc->prepad);
+		offset += ecc->bytes + ecc->prepad;
+
 		if (readl(nfc->regs + NFC_REG_ECC_ST) & NFC_ECC_ERR(0)) {
-			mtd->ecc_stats.failed++;
+			ret = nand_check_erased_ecc_chunk(buf, ecc->size,
+					oob, ecc->bytes + ecc->prepad,
+					NULL, 0,ecc->strength);
 		} else {
 			tmp = readl(nfc->regs + NFC_REG_ECC_ERR_CNT(0));
-			mtd->ecc_stats.corrected += NFC_ECC_ERR_CNT(0, tmp);
-			max_bitflips = max_t(unsigned int, max_bitflips, tmp);
+			ret = NFC_ECC_ERR_CNT(0, tmp);
 		}
 
-		if (oob_required) {
-			chip->cmdfunc(mtd, NAND_CMD_RNDOUT, offset, -1);
-			chip->read_buf(mtd, oob, ecc->bytes + ecc->prepad);
-			oob += ecc->bytes + ecc->prepad;
+		if (ret < 0) {
+			mtd->ecc_stats.failed++;
+		} else {
+			mtd->ecc_stats.corrected += ret;
+			max_bitflips = max_t(unsigned int, max_bitflips, ret);
 		}
 
-		offset += ecc->bytes + ecc->prepad;
+		buf += ecc->size;
+		oob += ecc->bytes + ecc->prepad;
 	}
 
 	if (oob_required) {
