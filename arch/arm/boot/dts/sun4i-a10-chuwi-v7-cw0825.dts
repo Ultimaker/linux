@@ -45,6 +45,7 @@
 #include "sunxi-common-regulators.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
 
 / {
 	model = "Chuwi V7 CW0825";
@@ -88,6 +89,16 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c2_pins_a>;
 	status = "okay";
+
+	ft5x: touchscreen@38 {
+		compatible = "focaltech,ft5x";
+		reg = <0x38>;
+		interrupt-parent = <&pio>;
+		interrupts = <7 21 IRQ_TYPE_EDGE_FALLING>;
+		pinctrl-names = "default";
+		touchscreen-size-x = <1024>;
+		touchscreen-size-y = <768>;
+	};
 };
 
 &lradc {
