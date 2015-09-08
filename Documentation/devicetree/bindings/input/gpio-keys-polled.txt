@@ -13,11 +13,16 @@ Subnode properties:
 
 	- gpios: OF device-tree gpio specification.
 	- label: Descriptive name of the key.
-	- linux,code: Keycode to emit.
+	- linux,code: Key / Axis code to emit.
 
 Optional subnode-properties:
 	- linux,input-type: Specify event type this button/key generates.
 	  If not specified defaults to <1> == EV_KEY.
+	- linux,input-value: If linux,input-type is EV_ABS or EV_REL then this
+	  value is send for events this button generates when pressed.
+	  EV_ABS axis will generate an event with a value of 0 when all
+	  buttons with linux,input-type == EV_ABS and linux,code == axis
+	  are released.
 	- debounce-interval: Debouncing interval time in milliseconds.
 	  If not specified defaults to 5.
 	- gpio-key,wakeup: Boolean, button can wake-up the system.
