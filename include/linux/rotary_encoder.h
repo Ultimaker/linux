@@ -11,6 +11,7 @@ struct rotary_encoder_platform_data {
 	bool relative_axis;
 	bool rollover;
 	bool half_period;
+	bool quarter_period;
 };
 
 #endif /* __ROTARY_ENCODER_H__ */
