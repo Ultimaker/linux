@@ -42,7 +42,7 @@ struct rotary_encoder {
 	bool armed;
 	unsigned char dir;	/* 0 - clockwise, 1 - CCW */
 
-	char last_stable;
+	int last_stable;
 };
 
 static int rotary_encoder_get_state(const struct rotary_encoder_platform_data *pdata)
@@ -117,6 +117,28 @@ static irqreturn_t rotary_encoder_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t rotary_encoder_quarter_period_irq(int irq, void *dev_id)
+{
+	struct rotary_encoder *encoder = dev_id;
+	int state;
+	static const u8 states[4][4] = {
+		{ -1,  1,  0, -1 },
+		{  0, -1, -1,  1 },
+		{  1, -1, -1,  0 },
+		{ -1,  0,  1, -1 },
+	};
+
+	state = rotary_encoder_get_state(encoder->pdata);
+
+	encoder->dir = states[encoder->last_stable][state];
+	encoder->last_stable = state;
+
+	if (encoder->dir >= 0)
+		rotary_encoder_report_event(encoder);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t rotary_encoder_half_period_irq(int irq, void *dev_id)
 {
 	struct rotary_encoder *encoder = dev_id;
@@ -180,7 +202,8 @@ static struct rotary_encoder_platform_data *rotary_encoder_parse_dt(struct devic
 					"rotary-encoder,rollover", NULL);
 	pdata->half_period = !!of_get_property(np,
 					"rotary-encoder,half-period", NULL);
-
+	pdata->quarter_period = !!of_get_property(np,
+					"rotary-encoder,quarter-period", NULL);
 	return pdata;
 }
 #else
@@ -253,6 +276,9 @@ static int rotary_encoder_probe(struct platform_device *pdev)
 	/* request the IRQs */
 	if (pdata->half_period) {
 		handler = &rotary_encoder_half_period_irq;
+		encoder->last_stable = rotary_encoder_get_state(pdata);
+	} else if (pdata->quarter_period) {
+		handler = &rotary_encoder_quarter_period_irq;
 		encoder->last_stable = rotary_encoder_get_state(pdata);
 	} else {
 		handler = &rotary_encoder_irq;
