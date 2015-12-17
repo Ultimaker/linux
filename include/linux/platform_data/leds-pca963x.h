@@ -36,6 +36,7 @@ enum pca963x_blink_type {
 struct pca963x_platform_data {
 	struct led_platform_data leds;
 	enum pca963x_outdrv outdrv;
+	bool inverted_out;
 	enum pca963x_blink_type blink_type;
 };
 
