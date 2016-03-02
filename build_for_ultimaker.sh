@@ -2,6 +2,25 @@
 
 # This script builds the kernel, kernel modules, device trees and boot scripts for the A20 linux system that we use.
 
+# Check for a valid cross compiler. When unset, the kernel tries to build itself
+# using arm-none-eabi-gcc, so we need to ensure it exists. Because printenv and
+# which can cause bash -e to exit, so run this before setting this up.
+CROSS_COMPILE=$(printenv CROSS_COMPILE)
+if [ ${CROSS_COMPILE+x} ]; then
+    _CROSS_COMPILE=`which arm-none-eabi-gcc`
+    if [ -z ${_CROSS_COMPILE} ]; then
+        _CROSS_COMPILE=`which arm-linux-gnueabihf-gcc`
+        if [ ${_CROSS_COMPILE} ]; then
+            CROSS_COMPILE="arm-linux-gnueabihf-"
+            export CROSS_COMPILE=${CROSS_COMPILE}
+        else
+            echo "No suiteable cross-compiler found."
+            echo "One can be set explicitly via the environment variable CROSS_COMPILE='arm-linux-gnueabihf-' for example."
+	    exit
+        fi
+    fi
+fi
+
 set -e
 set -u
 
@@ -56,7 +75,6 @@ setenv bootargs console=tty0 root=/dev/mmcblk0p2 ro rootwait rootfstype=ext4 con
 setenv fdt_high 0xffffffff
 ${BOOTSPLASH_COMMANDS}
 ext4load mmc 0 0x46000000 uImage-sun7i-a20-opinicus_v1
-ext4load mmc 0 0x49000000 sun7i-a20-opinicus_v1.dtb
 ext4load mmc 0 0x49000000 sun7i-a20-opinicus_nand_v1.dtb
 bootm 0x46000000 - 0x49000000
 EOT
