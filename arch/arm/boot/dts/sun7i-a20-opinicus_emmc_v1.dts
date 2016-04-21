@@ -169,6 +169,12 @@
 			linux,default-trigger = "none";
 		};
 	};
+
+	lm75b@4f {
+		label = "ambient";
+		compatible = "nxp,lm75b";
+		reg = <0x4f>;
+	};
 };
 
 &lradc {
