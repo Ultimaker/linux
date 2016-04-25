@@ -166,7 +166,6 @@ struct pca963x_led {
 	struct led_classdev led_cdev;
 	int led_num; /* 0 .. 15 potentially */
 	char name[32];
-	u8 gdc;
 	u8 gfrq;
 };
 
@@ -217,14 +216,9 @@ static void pca963x_blink(struct pca963x_led *pca963x)
 							PCA963X_MODE2);
 
 	i2c_smbus_write_byte_data(pca963x->chip->client,
-				  pca963x->chip->chipdef->grppwm,
-				  pca963x->gdc);
-
-	i2c_smbus_write_byte_data(pca963x->chip->client,
 				  pca963x->chip->chipdef->grpfreq,
 				  pca963x->gfrq);
 
-	mode2 = i2c_smbus_read_byte_data(pca963x->chip->client, PCA963X_MODE2);
 	if (!(mode2 & PCA963X_MODE2_DMBLNK))
 		i2c_smbus_write_byte_data(pca963x->chip->client, PCA963X_MODE2,
 					  mode2 | PCA963X_MODE2_DMBLNK);
@@ -258,7 +252,7 @@ static int pca963x_blink_set(struct led_classdev *led_cdev,
 {
 	struct pca963x_led *pca963x;
 	unsigned long time_on, time_off, period;
-	u8 gdc, gfrq;
+	u8 gfrq;
 
 	pca963x = container_of(led_cdev, struct pca963x_led, led_cdev);
 
@@ -282,20 +276,12 @@ static int pca963x_blink_set(struct led_classdev *led_cdev,
 	}
 
 	/*
-	 * From manual: duty cycle = (GDC / 256) ->
-	 *	(time_on / period) = (GDC / 256) ->
-	 *		GDC = ((time_on * 256) / period)
-	 */
-	gdc = (time_on * 256) / period;
-
-	/*
 	 * From manual: period = ((GFRQ + 1) / 24) in seconds.
 	 * So, period (in ms) = (((GFRQ + 1) / 24) * 1000) ->
 	 *		GFRQ = ((period * 24 / 1000) - 1)
 	 */
 	gfrq = (period * 24 / 1000) - 1;
 
-	pca963x->gdc = gdc;
 	pca963x->gfrq = gfrq;
 
 	pca963x_blink(pca963x);
@@ -476,6 +462,10 @@ static int pca963x_probe(struct i2c_client *client,
 
 		i2c_smbus_write_byte_data(client, PCA963X_MODE2, mode2);
 	}
+	/* Do not superimpose any extra brightness */
+	i2c_smbus_write_byte_data(pca963x->chip->client,
+				  pca963x->chip->chipdef->grpfreq,
+				  0x00);
 
 	return 0;
 
