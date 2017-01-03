@@ -16,6 +16,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/bitops.h>
 #include <linux/err.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -29,7 +30,7 @@
 #include <linux/of_device.h>
 #include <linux/acpi.h>
 
-#define AXP20X_OFF	0x80
+#define AXP20X_OFF	BIT(7)
 
 static const char * const axp20x_model_names[] = {
 	"AXP152",
