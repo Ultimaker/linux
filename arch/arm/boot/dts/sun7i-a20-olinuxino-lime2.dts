@@ -143,6 +143,8 @@
 				regulator-min-microvolt = <700000>;
 				regulator-max-microvolt = <3500000>;
 				regulator-always-on;
+				regulator-soft-start;
+				regulator-ramp-delay = <1600>;
 			};
 
 			vcc_csi1: ldo4 {
