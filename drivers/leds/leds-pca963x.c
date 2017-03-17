@@ -210,6 +210,7 @@ static void pca963x_blink(struct pca963x_led *pca963x)
 	u8 mode2 = i2c_smbus_read_byte_data(pca963x->chip->client,
 					    PCA963X_MODE2);
 
+	mutex_lock(&pca963x->chip->mutex);
 	i2c_smbus_write_byte_data(pca963x->chip->client,
 				  pca963x->chip->chipdef->grppwm,
 				  pca963x->gdc);
@@ -225,7 +226,6 @@ static void pca963x_blink(struct pca963x_led *pca963x)
 
 	ledout_addr = PCA963X_LEDOUT_ADDR(pca963x->chip->chipdef->ledout_base,
 					  pca963x->led_num);
-	mutex_lock(&pca963x->chip->mutex);
 	ledout = i2c_smbus_read_byte_data(pca963x->chip->client, ledout_addr);
 	if (PCA963X_LEDOUT_LDR_INV(ledout, pca963x->led_num) !=
 	    PCA963X_LEDOUT_LED_GRP_PWM) {
