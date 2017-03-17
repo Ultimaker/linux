@@ -207,8 +207,6 @@ static void pca963x_blink(struct pca963x_led *pca963x)
 {
 	u8 ledout_addr;
 	u8 ledout;
-	u8 mode2 = i2c_smbus_read_byte_data(pca963x->chip->client,
-					    PCA963X_MODE2);
 
 	mutex_lock(&pca963x->chip->mutex);
 	i2c_smbus_write_byte_data(pca963x->chip->client,
@@ -218,11 +216,6 @@ static void pca963x_blink(struct pca963x_led *pca963x)
 	i2c_smbus_write_byte_data(pca963x->chip->client,
 				  pca963x->chip->chipdef->grpfreq,
 				  pca963x->gfrq);
-
-	mode2 = i2c_smbus_read_byte_data(pca963x->chip->client, PCA963X_MODE2);
-	if (!(mode2 & PCA963X_MODE2_DMBLNK))
-		i2c_smbus_write_byte_data(pca963x->chip->client, PCA963X_MODE2,
-					  mode2 | PCA963X_MODE2_DMBLNK);
 
 	ledout_addr = PCA963X_LEDOUT_ADDR(pca963x->chip->chipdef->ledout_base,
 					  pca963x->led_num);
@@ -458,8 +451,9 @@ static int pca963x_probe(struct i2c_client *client,
 	i2c_smbus_write_byte_data(client, PCA963X_MODE1, 0x00);
 
 	if (pdata) {
-		/* Always enable LED output */
-		u8 mode2 = PCA963X_MODE2_OUTNE_OUTDRV;
+		/* Always enable LED output and set blink mode as default */
+		u8 mode2 = PCA963X_MODE2_OUTNE_OUTDRV |
+			   PCA963X_MODE2_DMBLNK;
 
 		/* Configure output: open-drain or totem pole (push-pull) */
 		if (pdata->outdrv == PCA963X_TOTEM_POLE)
