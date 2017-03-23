@@ -47,8 +47,8 @@
 #define PCA9634_GRPFREQ		0x0b /* Group frequency control for PCA9634 */
 #define PCA9635_GRPFREQ		0x13 /* Group frequency control for PCA9635 */
 #define PCA9633_LEDOUT_BASE	0x08 /* Led output state 0 reg for PCA9633 */
-#define PCA9634_LEDOUT_BASE	0x0c /* Led output state 0 reg for PCA9635 */
-#define PCA9635_LEDOUT_BASE	0x14 /* Led output state 0 reg for PCA9634 */
+#define PCA9634_LEDOUT_BASE	0x0c /* Led output state 0 reg for PCA9634 */
+#define PCA9635_LEDOUT_BASE	0x14 /* Led output state 0 reg for PCA9635 */
 #define PCA9633_SUBADDR(x)	\
 	((((x) - 1) % 0x3) + 0x09) /* I2C subaddr for PCA9633 */
 #define PCA9634_SUBADDR(x)	\
@@ -65,9 +65,9 @@
 #define PCA963X_MODE1_RESPOND_SUB2	BIT(2) /* Respond to Sub address 2 */
 #define PCA963X_MODE1_RESPOND_SUB1	BIT(3) /* Respond to Sub address 1 */
 #define PCA963X_MODE1_SLEEP		BIT(4) /* Put in low power mode */
-#define PCA963X_MODE1_AI_EN		BIT(5) /* Enable Auto-increment */
-#define PCA963X_MODE1_AI_ROLL_PWM	BIT(6) /* Auto-increment only PWM's */
-#define PCA963X_MODE1_AI_ROLL_GRP	BIT(7) /* AI only group-controls */
+#define PCA963X_MODE1_AI_ROLL_PWM	BIT(5) /* Auto-increment only PWM's */
+#define PCA963X_MODE1_AI_ROLL_GRP	BIT(6) /* AI only group-controls */
+#define PCA963X_MODE1_AI_EN		BIT(7) /* Enable Auto-increment */
 
 /* MODE2 register */
 #define PCA963X_MODE2_OUTNE_OUTDRV	BIT(0) /* Outdrv determines led state */
@@ -82,8 +82,8 @@
 #define PCA963X_LEDOUT_LED_ON		0x1 /* LED fully-on */
 #define PCA963X_LEDOUT_LED_PWM		0x2 /* LED PWM mode */
 #define PCA963X_LEDOUT_LED_GRP_PWM	0x3 /* LED PWM + group PWM mode */
+#define PCA963X_LEDOUT_MASK		0x3
 
-#define PCA963X_LEDOUT_MASK		PCA963X_LEDOUT_LED_GRP_PWM
 #define PCA963X_LEDOUT_ADDR(ledout_base, led_num) \
 	((ledout_base) + ((led_num) / 4))
 #define PCA963X_LEDOUT_LDR(x, led_num)	\
