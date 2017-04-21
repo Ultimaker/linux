@@ -35,8 +35,14 @@
 
 /* Offsets for the DesignWare specific registers */
 #define DW_UART_USR	0x1f /* UART Status Register */
-#define DW_UART_CPR	0xf4 /* Component Parameter Register */
-#define DW_UART_UCV	0xf8 /* UART Component Version */
+#define DW_UART_CPR	0x3d /* Component Parameter Register */
+#define DW_UART_UCV	0x3e /* UART Component Version */
+
+/* Offsets for the specific registers */
+#define OCTEON_UART_USR	0x27 /* UART Status Register */
+
+/* UART Status Register bits */
+#define DW_UART_USR_BUSY		BIT(0)
 
 /* Component Parameter Register bits */
 #define DW_UART_CPR_ABP_DATA_WIDTH	(3 << 0)
@@ -97,10 +103,15 @@ static void dw8250_check_lcr(struct uart_port *p, int value)
 
 	/* Make sure LCR write wasn't ignored */
 	while (tries--) {
+		struct dw8250_data *d = p->private_data;
+		unsigned int usr = serial_port_in(p, d->usr_reg);
 		unsigned int lcr = p->serial_in(p, UART_LCR);
 
 		if ((value & ~UART_LCR_SPAR) == (lcr & ~UART_LCR_SPAR))
 			return;
+
+		if (lcr & DW_UART_USR_BUSY)
+			continue;
 
 		dw8250_force_idle(p);
 
@@ -201,42 +212,50 @@ static unsigned int dw8250_serial_in32be(struct uart_port *p, int offset)
 static int dw8250_handle_irq(struct uart_port *p)
 {
 	struct dw8250_data *d = p->private_data;
-	unsigned int iir = p->serial_in(p, UART_IIR);
+	struct uart_8250_port *up = up_to_u8250p(p);
+	unsigned int iir = serial_port_in_IIR(p);
 	unsigned int status;
 	unsigned long flags;
+	unsigned int usr;
 
-	/*
-	 * There are ways to get Designware-based UARTs into a state where
-	 * they are asserting UART_IIR_RX_TIMEOUT but there is no actual
-	 * data available.  If we see such a case then we'll do a bogus
-	 * read.  If we don't do this then the "RX TIMEOUT" interrupt will
-	 * fire forever.
-	 *
-	 * This problem has only been observed so far when not in DMA mode
-	 * so we limit the workaround only to non-DMA mode.
-	 */
-	iir &= UART_IIR_MASK;
-	if (!up->dma && (iir == UART_IIR_RX_TIMEOUT)) {
-		spin_lock_irqsave(&p->lock, flags);
-		status = p->serial_in(p, UART_LSR);
-
-		if (!(status & (UART_LSR_DR | UART_LSR_BI)))
-			(void) p->serial_in(p, UART_RX);
-
-		spin_unlock_irqrestore(&p->lock, flags);
-	}
-
-	if (serial8250_handle_irq(p, iir))
-		return 1;
-
-	if (iir == UART_IIR_BUSY) {
-		/* Clear the USR */
-		(void)p->serial_in(p, d->usr_reg);
+	switch(iir) {
+	case UART_IIR_BUSY:
+		/*
+		 * We only clear the interrupt here, as handling of the LCR
+		 * failure condition is actually handled elsewhere (check_lcr).
+		 */
+		usr = serial_port_in(p, d->usr_reg);
+		if (p->membase == 0xf1c28c00)
+			if (usr & DW_UART_USR_BUSY)
+				printk("\nBusy while trying to write LCR (0x%x)\n", usr);
 
 		return 1;
+	case UART_IIR_RX_TIMEOUT:
+		/*
+		 * There are ways to get Designware-based UARTs into a state
+		 * where they are asserting UART_IIR_RX_TIMEOUT but there is no
+		 * actual data available.  If we see such a case then we'll do a
+		 * bogus read. If we don't do this then the "RX TIMEOUT"
+		 * interrupt will fire forever.
+		 *
+		 * This problem has only been observed so far when not in DMA
+		 * mode so we limit the workaround only to non-DMA mode.
+		 */
+		if (!up->dma) {
+			spin_lock_irqsave(&p->lock, flags);
+			status = serial_port_in(p, UART_LSR);
+
+			if (!(status & (UART_LSR_DR | UART_LSR_BI)))
+				(void)serial_port_in(p, UART_RX);
+
+			spin_unlock_irqrestore(&p->lock, flags);
+		}
+		break;
+	default:
+		break;
 	}
 
-	return 0;
+	return serial8250_handle_irq(p, iir);
 }
 
 static void
@@ -312,7 +331,7 @@ static void dw8250_quirks(struct uart_port *p, struct dw8250_data *data)
 			p->serial_out = dw8250_serial_outq;
 			p->flags = UPF_SKIP_TEST | UPF_SHARE_IRQ | UPF_FIXED_TYPE;
 			p->type = PORT_OCTEON;
-			data->usr_reg = 0x27;
+			data->usr_reg = OCTEON_UART_USR;
 			data->skip_autocfg = true;
 		}
 #endif
@@ -355,19 +374,21 @@ static void dw8250_setup_port(struct uart_port *p)
 	 * ADDITIONAL_FEATURES are not enabled. No need to go any further.
 	 */
 	if (p->iotype == UPIO_MEM32BE)
-		reg = ioread32be(p->membase + DW_UART_UCV);
+		reg = ioread32be(p->membase + (DW_UART_UCV << p->regshift));
 	else
-		reg = readl(p->membase + DW_UART_UCV);
+		reg = readl(p->membase + (DW_UART_UCV << p->regshift));
 	if (!reg)
 		return;
 
+	printk("Designware UART version %c.%c%c\n",
+		(reg >> 24) & 0xff, (reg >> 16) & 0xff, (reg >> 8) & 0xff);
 	dev_dbg(p->dev, "Designware UART version %c.%c%c\n",
 		(reg >> 24) & 0xff, (reg >> 16) & 0xff, (reg >> 8) & 0xff);
 
 	if (p->iotype == UPIO_MEM32BE)
-		reg = ioread32be(p->membase + DW_UART_CPR);
+		reg = ioread32be(p->membase + (DW_UART_CPR << p->regshift));
 	else
-		reg = readl(p->membase + DW_UART_CPR);
+		reg = readl(p->membase + (DW_UART_CPR << p->regshift));
 	if (!reg)
 		return;
 

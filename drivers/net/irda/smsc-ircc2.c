@@ -1579,10 +1579,10 @@ static irqreturn_t smsc_ircc_interrupt_sir(struct net_device *dev)
 
 	iobase = self->io.sir_base;
 
-	iir = inb(iobase + UART_IIR) & UART_IIR_ID;
-	if (iir == 0)
+	iir = inb(iobase + UART_IIR) & UART_IIR_MASK;
+	if (iir == UART_IIR_NO_INT)
 		return IRQ_NONE;
-	while (iir) {
+	while (iir != UART_IIR_NO_INT) {
 		/* Clear interrupt */
 		lsr = inb(iobase + UART_LSR);
 
@@ -1612,7 +1612,7 @@ static irqreturn_t smsc_ircc_interrupt_sir(struct net_device *dev)
 		if (boguscount++ > 100)
 			break;
 
-	        iir = inb(iobase + UART_IIR) & UART_IIR_ID;
+	        iir = inb(iobase + UART_IIR) & UART_IIR_MASK;
 	}
 	/*spin_unlock(&self->lock);*/
 	return IRQ_HANDLED;

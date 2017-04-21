@@ -813,8 +813,8 @@ static irqreturn_t ali_ircc_sir_interrupt(struct ali_ircc_cb *self)
 	
 	iobase = self->io.sir_base;
 
-	iir = inb(iobase+UART_IIR) & UART_IIR_ID;
-	if (iir) {	
+	iir = inb(iobase+UART_IIR) & UART_IIR_MASK;
+	if (iir != UART_IIR_NO_INT) {	
 		/* Clear interrupt */
 		lsr = inb(iobase+UART_LSR);
 
