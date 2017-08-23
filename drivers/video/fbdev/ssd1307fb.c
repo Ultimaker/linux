@@ -18,26 +18,47 @@
 #include <linux/uaccess.h>
 
 #define SSD1307FB_DATA			0x40
-#define SSD1307FB_COMMAND		0x80
+#define SSD1307FB_COMMAND		0x00    /* The datasheet is unclear about what exactly is the command start byte. Bit 8 (0x80) and bit 7 (0x40) are both explained as command/data. Experimentation shows that 0x40 is the bit that makes the distinction. And 0x80 causes commands with parameters to fail if they are written in a single write */
 
+#define SSD1307FB_LOWER_COLUMN_ADDRESS(x)	(0x00 | (x & 0x0f))
+#define SSD1307FB_HIGHER_COLUMN_ADDRESS(x)	(0x10 | ((x >> 4) & 0x0f))
 #define SSD1307FB_SET_ADDRESS_MODE	0x20
 #define SSD1307FB_SET_ADDRESS_MODE_HORIZONTAL	(0x00)
 #define SSD1307FB_SET_ADDRESS_MODE_VERTICAL	(0x01)
 #define SSD1307FB_SET_ADDRESS_MODE_PAGE		(0x02)
 #define SSD1307FB_SET_COL_RANGE		0x21
 #define SSD1307FB_SET_PAGE_RANGE	0x22
+#define SSD1307FB_SETUP_HORIZONTAL_SCROLL	0x26
+#define SSD1307FB_SETUP_VERTICAL_SCROLL	0x27
+#define SSD1307FB_SETUP_VERTICAL_RIGHT_SCROLL	0x29
+#define SSD1307FB_SETUP_VERTICAL_LEFT_SCROLL	0x2a
+#define SSD1307FB_SETUP_CONTENT_SCROLL_RIGHT	0x2c
+#define SSD1307FB_SETUP_CONTENT_SCROLL_LEFT	0x2d
+#define SSD1307FB_DEACTIVATE_SCROLL	0x2e
+#define SSD1307FB_ACTIVATE_SCROLL	0x2f
+#define SSD1307FB_SET_START_LINE(n)		(0x40 | (n & 0x3f))
 #define SSD1307FB_CONTRAST		0x81
 #define	SSD1307FB_CHARGE_PUMP		0x8d
+#define SSD1307FB_SEG_REMAP_OFF		0xa0
 #define SSD1307FB_SEG_REMAP_ON		0xa1
-#define SSD1307FB_DISPLAY_OFF		0xae
+#define SSD1307FB_SETUP_VERTICAL_SCROLL_AREA  0xa3
+#define SSD1307FB_ENTIRE_DISPLAY_ON_DISABLE	 0xa4
+#define SSD1307FB_ENTIRE_DISPLAY_ON_ENABLE	0xa5
+#define SSD1307FB_INVERT_OFF	0xa6
+#define SSD1307FB_INVERT_ON		0xa7
 #define SSD1307FB_SET_MULTIPLEX_RATIO	0xa8
+#define SSD1307FB_DISPLAY_OFF		0xae
 #define SSD1307FB_DISPLAY_ON		0xaf
-#define SSD1307FB_START_PAGE_ADDRESS	0xb0
+#define SSD1307FB_START_PAGE_ADDRESS(n)	(0xb0 | (n & 0x07))
+#define SSD1307FB_SET_COM_OUTPUT_SCAN_DIR_NORMAL	0xc0
+#define SSD1307FB_SET_COM_OUTPUT_SCAN_DIR_INVERT	0xc8
 #define SSD1307FB_SET_DISPLAY_OFFSET	0xd3
 #define	SSD1307FB_SET_CLOCK_FREQ	0xd5
 #define	SSD1307FB_SET_PRECHARGE_PERIOD	0xd9
 #define	SSD1307FB_SET_COM_PINS_CONFIG	0xda
 #define	SSD1307FB_SET_VCOMH		0xdb
+#define	SSD1307FB_NOP		0xe3
+#define SSD1307FB_SET_COMMAND_LOCK		0xfd	/* documentation says that this can be used to lock commands, with a 1 byte parameter. Testing shows that this does not work and that it uses 2 parameters. So the actual usage is unknown! */
 
 #define MAX_CONTRAST 255
 
@@ -61,6 +82,7 @@ struct ssd1307fb_par {
 	u32 com_lrremap;
 	u32 com_offset;
 	u32 com_seq;
+	int blank;
 	u32 contrast;
 	u32 dclk_div;
 	u32 dclk_frq;
@@ -77,6 +99,8 @@ struct ssd1307fb_par {
 	u32 seg_remap;
 	u32 vcomh;
 	u32 width;
+	u32 refresh_configuration_counter;
+	u32 refresh_configuration_top;
 };
 
 struct ssd1307fb_array {
@@ -97,6 +121,8 @@ static const struct fb_fix_screeninfo ssd1307fb_fix = {
 static const struct fb_var_screeninfo ssd1307fb_var = {
 	.bits_per_pixel	= 1,
 };
+
+static int sdd1307fb_refresh_configuration(struct ssd1307fb_par *par);
 
 static struct ssd1307fb_array *ssd1307fb_alloc_array(u32 len, u8 type)
 {
@@ -139,6 +165,41 @@ static inline int ssd1307fb_write_cmd(struct i2c_client *client, u8 cmd)
 	array->data[0] = cmd;
 
 	ret = ssd1307fb_write_array(client, array, 1);
+	kfree(array);
+
+	return ret;
+}
+
+static inline int ssd1307fb_write_cmd1(struct i2c_client *client, u8 cmd, u8 arg1)
+{
+	struct ssd1307fb_array *array;
+	int ret;
+
+	array = ssd1307fb_alloc_array(2, SSD1307FB_COMMAND);
+	if (!array)
+		return -ENOMEM;
+
+	array->data[0] = cmd;
+	array->data[1] = arg1;
+	ret = ssd1307fb_write_array(client, array, 2);
+	kfree(array);
+
+	return ret;
+}
+
+static inline int ssd1307fb_write_cmd2(struct i2c_client *client, u8 cmd, u8 arg1, u8 arg2)
+{
+	struct ssd1307fb_array *array;
+	int ret;
+
+	array = ssd1307fb_alloc_array(3, SSD1307FB_COMMAND);
+	if (!array)
+		return -ENOMEM;
+
+	array->data[0] = cmd;
+	array->data[1] = arg1;
+	array->data[2] = arg2;
+	ret = ssd1307fb_write_array(client, array, 3);
 	kfree(array);
 
 	return ret;
@@ -201,6 +262,16 @@ static void ssd1307fb_update_display(struct ssd1307fb_par *par)
 
 	ssd1307fb_write_array(par->client, array, par->width * par->height / 8);
 	kfree(array);
+
+	if (par->refresh_configuration_counter > 0)
+	{
+		par->refresh_configuration_counter -= 1;
+	}
+	else
+	{
+		par->refresh_configuration_counter = par->refresh_configuration_top;
+		sdd1307fb_refresh_configuration(par);
+	}
 }
 
 
@@ -238,6 +309,8 @@ static ssize_t ssd1307fb_write(struct fb_info *info, const char __user *buf,
 static int ssd1307fb_blank(int blank_mode, struct fb_info *info)
 {
 	struct ssd1307fb_par *par = info->par;
+
+	par->blank = blank_mode;
 
 	if (blank_mode != FB_BLANK_UNBLANK)
 		return ssd1307fb_write_cmd(par->client, SSD1307FB_DISPLAY_OFF);
@@ -282,12 +355,136 @@ static void ssd1307fb_deferred_io(struct fb_info *info,
 	ssd1307fb_update_display(info->par);
 }
 
-static int ssd1307fb_init(struct ssd1307fb_par *par)
+static int sdd1307fb_refresh_configuration(struct ssd1307fb_par *par)
 {
 	int ret;
 	u32 precharge, dclk, com_invdir, compins;
+
+	/* Set contrast */
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_CONTRAST, par->contrast);
+	if (ret < 0)
+		return ret;
+
+	/* Set segment re-map */
+	if (par->seg_remap) {
+		ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SEG_REMAP_ON);
+		if (ret < 0)
+			return ret;
+	} else {
+		ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SEG_REMAP_OFF);
+		if (ret < 0)
+			return ret;
+	}
+
+	/* Set COM direction */
+	if (par->com_invdir) {
+		ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_COM_OUTPUT_SCAN_DIR_INVERT);
+		if (ret < 0)
+			return ret;
+	} else {
+		ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_COM_OUTPUT_SCAN_DIR_NORMAL);
+		if (ret < 0)
+			return ret;
+	}
+
+	/* Set multiplex ratio value */
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_SET_MULTIPLEX_RATIO, par->height - 1);
+	if (ret < 0)
+		return ret;
+
+	/* set display offset value */
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_SET_DISPLAY_OFFSET, par->com_offset);
+	if (ret < 0)
+		return ret;
+
+	/* set the display starting line */
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_START_LINE(0));
+	if (ret < 0)
+		return ret;
+
+	/* Set clock frequency */
+	dclk = ((par->dclk_div - 1) & 0xf) | (par->dclk_frq & 0xf) << 4;
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_SET_CLOCK_FREQ, dclk);
+	if (ret < 0)
+		return ret;
+
+	/* Set precharge period in number of ticks from the internal clock */
+	precharge = (par->prechargep1 & 0xf) | (par->prechargep2 & 0xf) << 4;
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_SET_PRECHARGE_PERIOD, precharge);
+	if (ret < 0)
+		return ret;
+
+	/* Set COM pins configuration */
+	compins = 0x02 | !(par->com_seq & 0x1) << 4
+				   | (par->com_lrremap & 0x1) << 5;
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_SET_COM_PINS_CONFIG, compins);
+	if (ret < 0)
+		return ret;
+
+	/* Set VCOMH */
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_SET_VCOMH, par->vcomh);
+	if (ret < 0)
+		return ret;
+
+	/* Turn on the DC-DC Charge Pump */
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_CHARGE_PUMP, (par->device_info->need_chargepump & 0x1 << 2) & 0x14);
+	if (ret < 0)
+		return ret;
+
+	/* Switch to horizontal addressing mode */
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_SET_ADDRESS_MODE, SSD1307FB_SET_ADDRESS_MODE_HORIZONTAL);
+	if (ret < 0)
+		return ret;
+
+	/* Set column range, this also resets the column write pointer */
+	ret = ssd1307fb_write_cmd2(par->client, SSD1307FB_SET_COL_RANGE, 0, par->width - 1);
+	if (ret < 0)
+		return ret;
+
+	/* Set page range, this also resets the page write pointer */
+	ret = ssd1307fb_write_cmd2(par->client, SSD1307FB_SET_PAGE_RANGE, 0, par->page_offset + (par->height / 8) - 1);
+	if (ret < 0)
+		return ret;
+
+	/* Make sure invert mode is disabled */
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_INVERT_OFF);
+	if (ret < 0)
+		return ret;
+
+	/* Make sure "full display on" is disabled */
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_ENTIRE_DISPLAY_ON_DISABLE);
+	if (ret < 0)
+		return ret;
+
+	/* Make sure no scrolling is activated */
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_DEACTIVATE_SCROLL);
+	if (ret < 0)
+		return ret;
+
+	/* Turn the display on */
+	if (par->blank != FB_BLANK_UNBLANK)
+		ret = ssd1307fb_write_cmd(par->client, SSD1307FB_DISPLAY_OFF);
+	else
+		ret = ssd1307fb_write_cmd(par->client, SSD1307FB_DISPLAY_ON);
+
+    /* Set the write pointer position to 0. This is done in 3 parts, 2 for the column nibbles and 1 command for the page. The lower bits of these commands are used for the address value. */
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_LOWER_COLUMN_ADDRESS);
+	if (ret < 0)
+		return ret;
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_HIGHER_COLUMN_ADDRESS);
+	if (ret < 0)
+		return ret;
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_START_PAGE_ADDRESS);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
+static int ssd1307fb_init(struct ssd1307fb_par *par)
+{
+	int ret;
 	struct pwm_args pargs;
-	char status;
 
 	if (par->device_info->need_pwm) {
 		par->pwm = pwm_get(&par->client->dev, NULL);
@@ -313,140 +510,8 @@ static int ssd1307fb_init(struct ssd1307fb_par *par)
 			par->pwm->pwm, par->pwm_period);
 	};
 
-	/* Check if we can talk to the display */
-	ret = i2c_master_recv(par->client, &status, 1);
-	if (ret < 0)
-		return ret;
-
-	/* Set initial contrast */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_CONTRAST);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, par->contrast);
-	if (ret < 0)
-		return ret;
-
-	/* Set segment re-map */
-	if (par->seg_remap) {
-		ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SEG_REMAP_ON);
-		if (ret < 0)
-			return ret;
-	};
-
-	/* Set COM direction */
-	com_invdir = 0xc0 | (par->com_invdir & 0x1) << 3;
-	ret = ssd1307fb_write_cmd(par->client,  com_invdir);
-	if (ret < 0)
-		return ret;
-
-	/* Set multiplex ratio value */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_MULTIPLEX_RATIO);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, par->height - 1);
-	if (ret < 0)
-		return ret;
-
-	/* set display offset value */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_DISPLAY_OFFSET);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, par->com_offset);
-	if (ret < 0)
-		return ret;
-
-	/* Set clock frequency */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_CLOCK_FREQ);
-	if (ret < 0)
-		return ret;
-
-	dclk = ((par->dclk_div - 1) & 0xf) | (par->dclk_frq & 0xf) << 4;
-	ret = ssd1307fb_write_cmd(par->client, dclk);
-	if (ret < 0)
-		return ret;
-
-	/* Set precharge period in number of ticks from the internal clock */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_PRECHARGE_PERIOD);
-	if (ret < 0)
-		return ret;
-
-	precharge = (par->prechargep1 & 0xf) | (par->prechargep2 & 0xf) << 4;
-	ret = ssd1307fb_write_cmd(par->client, precharge);
-	if (ret < 0)
-		return ret;
-
-	/* Set COM pins configuration */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_COM_PINS_CONFIG);
-	if (ret < 0)
-		return ret;
-
-	compins = 0x02 | !(par->com_seq & 0x1) << 4
-				   | (par->com_lrremap & 0x1) << 5;
-	ret = ssd1307fb_write_cmd(par->client, compins);
-	if (ret < 0)
-		return ret;
-
-	/* Set VCOMH */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_VCOMH);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, par->vcomh);
-	if (ret < 0)
-		return ret;
-
-	/* Turn on the DC-DC Charge Pump */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_CHARGE_PUMP);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client,
-		BIT(4) | (par->device_info->need_chargepump ? BIT(2) : 0));
-	if (ret < 0)
-		return ret;
-
-	/* Switch to horizontal addressing mode */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_ADDRESS_MODE);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client,
-				  SSD1307FB_SET_ADDRESS_MODE_HORIZONTAL);
-	if (ret < 0)
-		return ret;
-
-	/* Set column range */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_COL_RANGE);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, 0x0);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, par->width - 1);
-	if (ret < 0)
-		return ret;
-
-	/* Set page range */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_PAGE_RANGE);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, 0x0);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client,
-				  par->page_offset + (par->height / 8) - 1);
-	if (ret < 0)
-		return ret;
-
-	/* Turn on the display */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_DISPLAY_ON);
+	/* On initialization, refresh the configuration, this sets up the display for proper viewing. */
+	ret = sdd1307fb_refresh_configuration(par);
 	if (ret < 0)
 		return ret;
 
@@ -461,12 +526,10 @@ static int ssd1307fb_update_bl(struct backlight_device *bdev)
 
 	par->contrast = brightness;
 
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_CONTRAST);
+	ret = ssd1307fb_write_cmd1(par->client, SSD1307FB_CONTRAST, par->contrast);
 	if (ret < 0)
 		return ret;
-	ret = ssd1307fb_write_cmd(par->client, par->contrast);
-	if (ret < 0)
-		return ret;
+
 	return 0;
 }
 
@@ -597,12 +660,16 @@ static int ssd1307fb_probe(struct i2c_client *client,
 	par->com_lrremap = of_property_read_bool(node, "solomon,com-lrremap");
 	par->com_invdir = of_property_read_bool(node, "solomon,com-invdir");
 
+	par->blank = FB_BLANK_UNBLANK;
 	par->contrast = 127;
 	par->vcomh = par->device_info->default_vcomh;
 
 	/* Setup display timing */
 	par->dclk_div = par->device_info->default_dclk_div;
 	par->dclk_frq = par->device_info->default_dclk_frq;
+	
+	par->refresh_configuration_top = 100; /* amount of update cycles between configuration refreshes */
+	par->refresh_configuration_counter = par->refresh_configuration_top;
 
 	vmem_size = par->width * par->height / 8;
 
