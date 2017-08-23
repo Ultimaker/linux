@@ -467,17 +467,6 @@ static int sdd1307fb_refresh_configuration(struct ssd1307fb_par *par)
 	else
 		ret = ssd1307fb_write_cmd(par->client, SSD1307FB_DISPLAY_ON);
 
-    /* Set the write pointer position to 0. This is done in 3 parts, 2 for the column nibbles and 1 command for the page. The lower bits of these commands are used for the address value. */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_LOWER_COLUMN_ADDRESS);
-	if (ret < 0)
-		return ret;
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_HIGHER_COLUMN_ADDRESS);
-	if (ret < 0)
-		return ret;
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_START_PAGE_ADDRESS);
-	if (ret < 0)
-		return ret;
-
 	return 0;
 }
 
