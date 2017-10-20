@@ -19,6 +19,7 @@
 
 #include <linux/clk.h>
 #include <linux/component.h>
+#include <linux/i2c.h>
 #include <linux/iopoll.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
@@ -30,7 +31,6 @@
 #include "sun4i_crtc.h"
 #include "sun4i_drv.h"
 #include "sun4i_hdmi.h"
-#include "sun4i_hdmi_i2c.h"
 #include "sun4i_tcon.h"
 
 static inline struct sun4i_hdmi *
@@ -305,27 +305,6 @@ static const struct sun4i_hdmi_variant sun4i_variant = {
 				  SUN4I_HDMI_PLL_CTRL_HV_IS_33 |
 				  SUN4I_HDMI_PLL_CTRL_BWS |
 				  SUN4I_HDMI_PLL_CTRL_PLL_EN,
-
-	.ddc_clk_reg		= REG_FIELD(SUN4I_HDMI_DDC_CLK_REG, 0, 6),
-	.ddc_clk_pre_divider	= 2,
-	.ddc_clk_m_offset	= 1,
-
-	.field_ddc_en		= REG_FIELD(SUN4I_HDMI_DDC_CTRL_REG, 31, 31),
-	.field_ddc_start	= REG_FIELD(SUN4I_HDMI_DDC_CTRL_REG, 30, 30),
-	.field_ddc_reset	= REG_FIELD(SUN4I_HDMI_DDC_CTRL_REG, 0, 0),
-	.field_ddc_addr_reg	= REG_FIELD(SUN4I_HDMI_DDC_ADDR_REG, 0, 31),
-	.field_ddc_slave_addr	= REG_FIELD(SUN4I_HDMI_DDC_ADDR_REG, 0, 6),
-	.field_ddc_int_status	= REG_FIELD(SUN4I_HDMI_DDC_INT_STATUS_REG, 0, 8),
-	.field_ddc_fifo_clear	= REG_FIELD(SUN4I_HDMI_DDC_FIFO_CTRL_REG, 31, 31),
-	.field_ddc_fifo_rx_thres = REG_FIELD(SUN4I_HDMI_DDC_FIFO_CTRL_REG, 4, 7),
-	.field_ddc_fifo_tx_thres = REG_FIELD(SUN4I_HDMI_DDC_FIFO_CTRL_REG, 0, 3),
-	.field_ddc_byte_count	= REG_FIELD(SUN4I_HDMI_DDC_BYTE_COUNT_REG, 0, 9),
-	.field_ddc_cmd		= REG_FIELD(SUN4I_HDMI_DDC_CMD_REG, 0, 2),
-	.field_ddc_sda_en	= REG_FIELD(SUN4I_HDMI_DDC_LINE_CTRL_REG, 9, 9),
-	.field_ddc_sck_en	= REG_FIELD(SUN4I_HDMI_DDC_LINE_CTRL_REG, 8, 8),
-
-	.ddc_fifo_reg		= SUN4I_HDMI_DDC_FIFO_DATA_REG,
-	.ddc_fifo_has_dir	= true,
 };
 
 static const struct sun4i_hdmi_variant sun5i_variant = {
@@ -398,13 +377,14 @@ static const struct regmap_config sun4i_hdmi_regmap_config = {
 	.reg_bits	= 32,
 	.val_bits	= 32,
 	.reg_stride	= 4,
-	.max_register	= 0x580,
+	.max_register	= 0x500,
 };
 
 static int sun4i_hdmi_bind(struct device *dev, struct device *master,
 			   void *data)
 {
 	struct platform_device *pdev = to_platform_device(dev);
+	struct device_node *i2c_np;
 	struct drm_device *drm = data;
 	struct sun4i_drv *drv = drm->dev_private;
 	struct sun4i_hdmi *hdmi;
@@ -478,7 +458,8 @@ static int sun4i_hdmi_bind(struct device *dev, struct device *master,
 					     &sun4i_hdmi_regmap_config);
 	if (IS_ERR(hdmi->regmap)) {
 		dev_err(dev, "Couldn't create HDMI encoder regmap\n");
-		return PTR_ERR(hdmi->regmap);
+		ret = PTR_ERR(hdmi->regmap);
+		goto err_disable_mod_clk;
 	}
 
 	ret = sun4i_tmds_create(hdmi);
@@ -507,10 +488,30 @@ static int sun4i_hdmi_bind(struct device *dev, struct device *master,
 	reg |= hdmi->variant->pll_ctrl_init_val;
 	writel(reg, hdmi->base + SUN4I_HDMI_PLL_CTRL_REG);
 
-	ret = sun4i_hdmi_i2c_create(dev, hdmi);
+	/* TODO EM-2040 have ddc-i2c setup its own clock. */
+//	dev_err(dev, "ddc parent: %p, name %s", hdmi->ddc_parent_clk, "bla");
+	ret = sun4i_ddc_create(hdmi, hdmi->ddc_parent_clk);
 	if (ret) {
-		dev_err(dev, "Couldn't create the HDMI I2C adapter\n");
+		dev_err(dev, "Failed to setup ddc clock\n");
 		goto err_disable_mod_clk;
+	}
+	clk_prepare_enable(hdmi->ddc_clk);
+	clk_set_rate(hdmi->ddc_clk, 100000);
+	dev_err(dev, "ddc_clk: %p, name: %s", hdmi->ddc_clk, "bla");
+
+	i2c_np = of_parse_phandle(dev->of_node, "ddc-i2c-bus", 0);
+	if (!i2c_np) {
+		dev_warn(dev, "Couldn't find ddc-i2c-bus node in %s\n",
+			 i2c_np->full_name);
+		/* TODO EM-2040 fallback to hdmi_i2c device for backwards compatibility ... */
+		goto err_disable_mod_clk;
+	}
+
+	/* TODO EM-2040 work without i2c support? */
+	hdmi->i2c = of_find_i2c_adapter_by_node(i2c_np);
+	if (!hdmi->i2c) {
+		dev_warn(dev, "Couldn't create the HDMI I2C adapter\n");
+		dev_warn(dev, "Continuing without\n");
 	}
 
 	drm_encoder_helper_add(&hdmi->encoder,
@@ -522,14 +523,14 @@ static int sun4i_hdmi_bind(struct device *dev, struct device *master,
 			       NULL);
 	if (ret) {
 		dev_err(dev, "Couldn't initialise the HDMI encoder\n");
-		goto err_del_i2c_adapter;
+		goto err_disable_mod_clk;
 	}
 
 	hdmi->encoder.possible_crtcs = drm_of_find_possible_crtcs(drm,
 								  dev->of_node);
 	if (!hdmi->encoder.possible_crtcs) {
 		ret = -EPROBE_DEFER;
-		goto err_del_i2c_adapter;
+		goto err_disable_mod_clk;
 	}
 
 #ifdef CONFIG_DRM_SUN4I_HDMI_CEC
@@ -568,8 +569,6 @@ static int sun4i_hdmi_bind(struct device *dev, struct device *master,
 err_cleanup_connector:
 	cec_delete_adapter(hdmi->cec_adap);
 	drm_encoder_cleanup(&hdmi->encoder);
-err_del_i2c_adapter:
-	i2c_del_adapter(hdmi->i2c);
 err_disable_mod_clk:
 	clk_disable_unprepare(hdmi->mod_clk);
 err_disable_bus_clk:
@@ -587,7 +586,6 @@ static void sun4i_hdmi_unbind(struct device *dev, struct device *master,
 	cec_unregister_adapter(hdmi->cec_adap);
 	drm_connector_cleanup(&hdmi->connector);
 	drm_encoder_cleanup(&hdmi->encoder);
-	i2c_del_adapter(hdmi->i2c);
 	clk_disable_unprepare(hdmi->mod_clk);
 	clk_disable_unprepare(hdmi->bus_clk);
 }

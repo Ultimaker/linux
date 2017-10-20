@@ -162,6 +162,5 @@ struct sun4i_hdmi {
 
 int sun4i_ddc_create(struct sun4i_hdmi *hdmi, struct clk *clk);
 int sun4i_tmds_create(struct sun4i_hdmi *hdmi);
-int sun4i_hdmi_i2c_create(struct device *dev, struct sun4i_hdmi *hdmi);
 
 #endif /* _SUN4I_HDMI_H_ */

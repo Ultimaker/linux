@@ -121,6 +121,7 @@
 };
 
 &hdmi {
+	ddc-i2c-bus = <&hdmi_i2c>;
 	status = "okay";
 };
 

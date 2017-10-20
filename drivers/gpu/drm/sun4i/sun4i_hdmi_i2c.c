@@ -9,16 +9,29 @@
  */
 
 #include <linux/clk.h>
+#include <linux/compiler.h>
+#include <linux/device.h>
+#include <linux/errno.h>
+#include <linux/gfp.h>
 #include <linux/i2c.h>
 #include <linux/iopoll.h>
+#include <linux/ioport.h>
+#include <linux/module.h>
+#include <linux/of_device.h>
+#include <linux/platform_device.h>
+#include <linux/regmap.h>
+#include <linux/string.h>
 
 #include "sun4i_hdmi.h"
 #include "sun4i_hdmi_i2c.h"
+
+#define SUN4I_HDMI_I2C_DRIVER_NAME "sun4i-hdmi-i2c"
 
 /* FIFO request bit is set when FIFO level is above RX_THRESHOLD during read */
 #define RX_THRESHOLD SUN4I_HDMI_DDC_FIFO_CTRL_RX_THRES_MAX
 
 struct sun4i_hdmi_i2c_variant {
+	bool has_ddc_parent_clk;
 	struct reg_field ddc_clk_reg;
 	u8 ddc_clk_pre_divider;
 	u8 ddc_clk_m_offset;
@@ -86,7 +99,7 @@ struct sun4i_hdmi_i2c_drv {
 	const struct sun4i_hdmi_i2c_variant	*variant;
 };
 
-static const struct sun4i_hdmi_i2c_variant sun5i_variant = {
+static const struct sun4i_hdmi_i2c_variant sun4i_variant = {
 	.ddc_clk_reg		= REG_FIELD(SUN4I_HDMI_DDC_CLK_REG, 0, 6),
 	.ddc_clk_pre_divider	= 2,
 	.ddc_clk_m_offset	= 1,
@@ -110,6 +123,7 @@ static const struct sun4i_hdmi_i2c_variant sun5i_variant = {
 };
 
 static const struct sun4i_hdmi_i2c_variant sun6i_variant = {
+	.has_ddc_parent_clk	= true,
 	.ddc_clk_reg		= REG_FIELD(SUN6I_HDMI_DDC_CLK_REG, 0, 6),
 	.ddc_clk_pre_divider	= 1,
 	.ddc_clk_m_offset	= 2,
@@ -130,6 +144,13 @@ static const struct sun4i_hdmi_i2c_variant sun6i_variant = {
 
 	.ddc_fifo_reg		= SUN6I_HDMI_DDC_FIFO_DATA_REG,
 	.ddc_fifo_thres_incl	= true,
+};
+
+static const struct regmap_config sun4i_hdmi_i2c_regmap_config = {
+	.reg_bits	= 32,
+	.val_bits	= 32,
+	.reg_stride	= 4,
+	.max_register	= 0x80,
 };
 
 static int fifo_transfer(struct sun4i_hdmi_i2c_drv *drv, u8 *buf, int len, bool read)
@@ -268,8 +289,9 @@ static int sun4i_hdmi_i2c_xfer(struct i2c_adapter *adap,
 	}
 
 	/* DDC clock needs to be enabled for the module to work */
-	clk_prepare_enable(drv->ddc_clk);
-	clk_set_rate(drv->ddc_clk, 100000);
+	/* TODO EM-2040 */
+//	clk_prepare_enable(drv->ddc_clk);
+//	clk_set_rate(drv->ddc_clk, 100000);
 
 	/* Reset I2C controller */
 	regmap_field_write(drv->field_ddc_en, 1);
@@ -394,52 +416,107 @@ static int sun4i_hdmi_i2c_init_regmap_fields(struct sun4i_hdmi_i2c_drv *drv)
 	return 0;
 }
 
-int sun4i_hdmi_i2c_create(struct device *dev, struct sun4i_hdmi *hdmi)
+static const struct of_device_id sun4i_hdmi_i2c_of_table[] = {
+	{ .compatible = "allwinner,sun4i-a10-hdmi-i2c", .data = &sun4i_variant },
+	{ .compatible = "allwinner,sun5i-a10s-hdmi-i2c", .data = &sun4i_variant },
+	{ .compatible = "allwinner,sun6i-a31-hdmi-i2c", .data = &sun6i_variant },
+	{ .compatible = "allwinner,sun7i-a20-hdmi-i2c", .data = &sun4i_variant },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, sun4i_hdmi_i2c_of_table);
+
+static int sun4i_hdmi_i2c_probe(struct platform_device *pdev)
 {
+	const struct of_device_id *of_id;
 	struct sun4i_hdmi_i2c_drv *drv;
+	struct resource *res;
+	struct clk *ddc_parent_clk;
 	int ret = 0;
 
-	ret = sun4i_ddc_create(hdmi, hdmi->ddc_parent_clk);
-	if (ret)
-		return ret;
-
-	drv = devm_kzalloc(dev, sizeof(*drv), GFP_KERNEL);
+	drv = devm_kzalloc(&pdev->dev, sizeof(*drv), GFP_KERNEL);
 	if (!drv)
 		return -ENOMEM;
 
-	drv->dev = dev;
+	drv->dev = &pdev->dev;
+	platform_set_drvdata(pdev, drv);
 
-	drv->base = hdmi->base;
-	drv->regmap = hdmi->regmap;
+	of_id = of_match_device(sun4i_hdmi_i2c_of_table, drv->dev);
+	if (!of_id) {
+		dev_err(drv->dev, "missing platform data\n");
+		return -ENODEV;
+	}
+	drv->variant = of_id->data;
 
-	/* Hacks until we set up the clks etc properly from here. */
-	drv->ddc_clk = hdmi->ddc_clk;
-
-	if (of_device_is_compatible(dev->of_node, "allwinner,sun5i-a10s-hdmi"))
-		drv->variant = &sun5i_variant;
-	if (of_device_is_compatible(dev->of_node, "allwinner,sun6i-a31-hdmi"))
-		drv->variant = &sun6i_variant;
-	if (!drv->variant) {
-		dev_err(dev, "unsupported platform variant");
-		return -EINVAL;
+	//of_io_request_and_map
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	drv->base = devm_ioremap_resource(drv->dev, res);
+	if (IS_ERR(drv->base)) {
+		dev_err(drv->dev, "couldn't map the HDMI-I2C registers\n");
+		return PTR_ERR(drv->base);
 	}
 
+	if (drv->variant->has_ddc_parent_clk) {
+		ddc_parent_clk = devm_clk_get(drv->dev, "ddc");
+	} else {
+		ddc_parent_clk = devm_clk_get(drv->dev, "hdmi-tmds");
+	}
+	if (IS_ERR(ddc_parent_clk)) {
+		dev_err(drv->dev, "couldn't get the HDMI-I2C clock\n");
+		dev_err(drv->dev, "hdmi-tdms err: %d", PTR_ERR(ddc_parent_clk));
+	//	return PTR_ERR(ddc_parent_clk);
+	}
+	/* TODO EM-2040 until we set up the clks etc properly from here. */
+//drv->ddc_clk = hdmi->ddc_clk;
+	// drv->ddc_clk = devm_clk_get(pdev, "ddc");
+	// if (IS_ERR(drv->ddc_clk)) {
+	// 	dev_err(drv->dev, "couldn't get the HDMI-I2C bus clock\n");
+	// 	return PTR_ERR(drv->ddc_clk);
+	// }
+	// clk_prepare_enable(drv->ddc_clk);
+
+	drv->regmap = devm_regmap_init_mmio(drv->dev, drv->base,
+					    &sun4i_hdmi_i2c_regmap_config);
+	if (IS_ERR(drv->regmap)) {
+		dev_err(drv->dev, "couldn't create HDMI-I2C regmap\n");
+		return PTR_ERR(drv->regmap);
+	}
 	ret = sun4i_hdmi_i2c_init_regmap_fields(drv);
 	if (ret)
 		return ret;
 
-
 	i2c_set_adapdata(&drv->adap, drv);
+	drv->adap.dev.parent = &pdev->dev;
 	drv->adap.owner = THIS_MODULE;
 	drv->adap.class = I2C_CLASS_DDC;
 	drv->adap.algo = &sun4i_hdmi_i2c_algorithm;
+	drv->adap.nr = pdev->id;
+	drv->adap.dev.of_node = pdev->dev.of_node;
 	strlcpy(drv->adap.name, "sun4i_hdmi_i2c adapter", sizeof(drv->adap.name));
 
-	ret = i2c_add_adapter(&drv->adap);
-	if (ret)
-		return ret;
-
-	hdmi->i2c = &drv->adap;
-
-	return ret;
+	return i2c_add_numbered_adapter(&drv->adap);
 }
+
+static int sun4i_hdmi_i2c_remove(struct platform_device *pdev)
+{
+	struct sun4i_hdmi_i2c_drv *drv = platform_get_drvdata(pdev);
+
+	// clk_unprepare_enable(drv->ddc_clk);
+	i2c_del_adapter(&drv->adap);
+
+	return 0;
+}
+
+static struct platform_driver sun4i_hdmi_i2c_driver = {
+	.probe	= sun4i_hdmi_i2c_probe,
+	.remove	= sun4i_hdmi_i2c_remove,
+	.driver	= {
+		.name 		= SUN4I_HDMI_I2C_DRIVER_NAME,
+		.of_match_table	= sun4i_hdmi_i2c_of_table,
+	},
+};
+module_platform_driver(sun4i_hdmi_i2c_driver);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Olliver Schinagl <oliver@schinagl.nl>");
+MODULE_DESCRIPTION("I2C adapter driver for Allwinner sunxi HDMI I2C bus");
+MODULE_ALIAS("platform:" SUN4I_HDMI_I2C_DRIVER_NAME);
