@@ -35,7 +35,7 @@ static bool touchscreen_get_prop_u32(struct device *dev,
 
 static void touchscreen_set_params(struct input_dev *dev,
 				   unsigned long axis,
-				   int max, int fuzz)
+				   int min, int max, int fuzz)
 {
 	struct input_absinfo *absinfo;
 
@@ -47,6 +47,7 @@ static void touchscreen_set_params(struct input_dev *dev,
 	}
 
 	absinfo = &dev->absinfo[axis];
+	absinfo->minimum = min;
 	absinfo->maximum = max;
 	absinfo->fuzz = fuzz;
 }
@@ -69,7 +70,7 @@ void touchscreen_parse_properties(struct input_dev *input, bool multitouch,
 {
 	struct device *dev = input->dev.parent;
 	unsigned int axis;
-	unsigned int max, fuzz;
+	unsigned int min, max, fuzz;
 	bool ret;
 
 	input_alloc_absinfo(input);
@@ -77,7 +78,10 @@ void touchscreen_parse_properties(struct input_dev *input, bool multitouch,
 		return;
 
 	axis = multitouch ? ABS_MT_POSITION_X : ABS_X;
-	ret = touchscreen_get_prop_u32(dev, "touchscreen-size-x",
+	ret = touchscreen_get_prop_u32(dev, "touchscreen-min-size-x",
+				       input_abs_get_min(input, axis),
+				       &min) |
+	      touchscreen_get_prop_u32(dev, "touchscreen-size-x",
 				       input_abs_get_max(input, axis) + 1,
 				       &max) |
 	      touchscreen_get_prop_u32(dev, "touchscreen-max-size-x",
@@ -87,10 +91,13 @@ void touchscreen_parse_properties(struct input_dev *input, bool multitouch,
 				       input_abs_get_fuzz(input, axis),
 				       &fuzz);
 	if (ret)
-		touchscreen_set_params(input, axis, max - 1, fuzz);
+		touchscreen_set_params(input, axis, min, max - 1, fuzz);
 
 	axis = multitouch ? ABS_MT_POSITION_Y : ABS_Y;
-	ret = touchscreen_get_prop_u32(dev, "touchscreen-size-y",
+	ret = touchscreen_get_prop_u32(dev, "touchscreen-min-size-y",
+				       input_abs_get_min(input, axis),
+				       &min) |
+	      touchscreen_get_prop_u32(dev, "touchscreen-size-y",
 				       input_abs_get_max(input, axis) + 1,
 				       &max) |
 	      touchscreen_get_prop_u32(dev, "touchscreen-max-size-y",
@@ -100,7 +107,7 @@ void touchscreen_parse_properties(struct input_dev *input, bool multitouch,
 				       input_abs_get_fuzz(input, axis),
 				       &fuzz);
 	if (ret)
-		touchscreen_set_params(input, axis, max - 1, fuzz);
+		touchscreen_set_params(input, axis, min, max - 1, fuzz);
 
 	axis = multitouch ? ABS_MT_PRESSURE : ABS_PRESSURE;
 	ret = touchscreen_get_prop_u32(dev, "touchscreen-max-pressure",
@@ -110,7 +117,7 @@ void touchscreen_parse_properties(struct input_dev *input, bool multitouch,
 				       input_abs_get_fuzz(input, axis),
 				       &fuzz);
 	if (ret)
-		touchscreen_set_params(input, axis, max, fuzz);
+		touchscreen_set_params(input, axis, 0, max, fuzz);
 
 	if (!prop)
 		return;
