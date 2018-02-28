@@ -623,6 +623,9 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			clocks = <&hdmi>;
+			dmas = <&dma SUN4I_DMA_NORMAL 16>,
+			       <&dma SUN4I_DMA_NORMAL 16>;
+			dma-names = "ddc-tx", "ddc-rx";
 			status = "disabled";
 		};
 
