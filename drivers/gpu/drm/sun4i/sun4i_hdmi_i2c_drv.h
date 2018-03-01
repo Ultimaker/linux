@@ -105,6 +105,15 @@
 #define SUN4I_HDMI_DDC_CLK_N_GET(reg)          \
        ((reg) & SUN4I_HDMI_DDC_CLK_N_MASK)
 
+#define SUN4I_HDMI_DDC_EXT_REG		0x24
+#define SUN4I_HDMI_DDC_EXT_BUS_BUSY		BIT(10)
+#define SUN4I_HDMI_DDC_EXT_SDA_STATE		BIT(9)
+#define SUN4I_HDMI_DDC_EXT_SCK_STATE		BIT(8)
+#define SUN4I_HDMI_DDC_EXT_SCL_LINE_CTRL	BIT(3)
+#define SUN4I_HDMI_DDC_EXT_SCL_LINE_CTRL_EN	BIT(2)
+#define SUN4I_HDMI_DDC_EXT_SDA_LINE_CTRL	BIT(1)
+#define SUN4I_HDMI_DDC_EXT_SDA_LINE_CTRL_EN	BIT(0)
+
 #define SUN4I_HDMI_DDC_LINE_CTRL_REG	0x40
 #define SUN4I_HDMI_DDC_LINE_CTRL_SDA_ENABLE	BIT(9)
 #define SUN4I_HDMI_DDC_LINE_CTRL_SCL_ENABLE	BIT(8)
@@ -118,6 +127,8 @@
 #define SUN6I_HDMI_DDC_CTRL_SDA_ENABLE		BIT(6)
 #define SUN6I_HDMI_DDC_CTRL_SCL_ENABLE		BIT(4)
 #define SUN6I_HDMI_DDC_CTRL_ENABLE		BIT(0)
+
+#define SUN6I_HDMI_DDC_EXT_REG		0x04
 
 #define SUN6I_HDMI_DDC_CMD_REG		0x08
 #define SUN6I_HDMI_DDC_CMD_BYTE_COUNT(count)	((count) << 16)
@@ -164,6 +175,13 @@ struct sun4i_hdmi_i2c_variant {
 	struct reg_field	field_ddc_cmd;
 	struct reg_field	field_ddc_sda_en;
 	struct reg_field	field_ddc_sck_en;
+	struct reg_field	field_ddc_bus_busy;
+	struct reg_field	field_ddc_sda_state;
+	struct reg_field	field_ddc_sck_state;
+	struct reg_field	field_ddc_sda_line_ctrl_en;
+	struct reg_field	field_ddc_sck_line_ctrl_en;
+	struct reg_field	field_ddc_sda_line_ctrl;
+	struct reg_field	field_ddc_sck_line_ctrl;
 
 	/* DDC FIFO register offset */
 	u32			ddc_fifo_reg;
@@ -210,6 +228,13 @@ struct sun4i_hdmi_i2c_drv {
 	struct regmap_field	*field_ddc_cmd;
 	struct regmap_field	*field_ddc_sda_en;
 	struct regmap_field	*field_ddc_sck_en;
+	struct regmap_field	*field_ddc_bus_busy;
+	struct regmap_field	*field_ddc_sda_state;
+	struct regmap_field	*field_ddc_sck_state;
+	struct regmap_field	*field_ddc_sda_line_ctrl;
+	struct regmap_field	*field_ddc_sck_line_ctrl;
+	struct regmap_field	*field_ddc_sda_line_ctrl_en;
+	struct regmap_field	*field_ddc_sck_line_ctrl_en;
 
 	const struct sun4i_hdmi_i2c_variant	*variant;
 };

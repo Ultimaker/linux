@@ -65,6 +65,20 @@ static const struct sun4i_hdmi_i2c_variant sun4i_legacy_variant = {
 				  SUN4I_HDMI_DDC_OFFSET, 9, 9),
 	.field_ddc_sck_en	= REG_FIELD(SUN4I_HDMI_DDC_LINE_CTRL_REG +
 				  SUN4I_HDMI_DDC_OFFSET, 8, 8),
+	.field_ddc_bus_busy	= REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				  SUN4I_HDMI_DDC_OFFSET, 10, 10),
+	.field_ddc_sda_state	= REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				  SUN4I_HDMI_DDC_OFFSET, 9, 9),
+	.field_ddc_sck_state	= REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				  SUN4I_HDMI_DDC_OFFSET, 8, 8),
+	.field_ddc_sck_line_ctrl = REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				   SUN4I_HDMI_DDC_OFFSET, 3, 3),
+	.field_ddc_sck_line_ctrl_en = REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				      SUN4I_HDMI_DDC_OFFSET, 2, 2),
+	.field_ddc_sda_line_ctrl = REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				   SUN4I_HDMI_DDC_OFFSET, 1, 1),
+	.field_ddc_sda_line_ctrl_en = REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				      SUN4I_HDMI_DDC_OFFSET, 0, 0),
 
 	.ddc_fifo_reg		= SUN4I_HDMI_DDC_FIFO_DATA_REG +
 				  SUN4I_HDMI_DDC_OFFSET,
@@ -104,6 +118,20 @@ static const struct sun4i_hdmi_i2c_variant sun6i_legacy_variant = {
 				  SUN4I_HDMI_DDC_OFFSET, 6, 6),
 	.field_ddc_sck_en	= REG_FIELD(SUN6I_HDMI_DDC_CTRL_REG +
 				  SUN4I_HDMI_DDC_OFFSET, 4, 4),
+	.field_ddc_bus_busy	= REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				  SUN4I_HDMI_DDC_OFFSET, 10, 10),
+	.field_ddc_sda_state	= REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				  SUN4I_HDMI_DDC_OFFSET, 9, 9),
+	.field_ddc_sck_state	= REG_FIELD(SUN4I_HDMI_DDC_EXT_REG +
+				  SUN4I_HDMI_DDC_OFFSET, 8, 8),
+	.field_ddc_sck_line_ctrl = REG_FIELD(SUN6I_HDMI_DDC_EXT_REG +
+				   SUN4I_HDMI_DDC_OFFSET, 3, 3),
+	.field_ddc_sck_line_ctrl_en = REG_FIELD(SUN6I_HDMI_DDC_EXT_REG +
+				      SUN4I_HDMI_DDC_OFFSET, 2, 2),
+	.field_ddc_sda_line_ctrl = REG_FIELD(SUN6I_HDMI_DDC_EXT_REG +
+				   SUN4I_HDMI_DDC_OFFSET, 1, 1),
+	.field_ddc_sda_line_ctrl_en = REG_FIELD(SUN6I_HDMI_DDC_EXT_REG +
+				   SUN4I_HDMI_DDC_OFFSET, 0, 0),
 
 	.ddc_fifo_reg		= SUN6I_HDMI_DDC_FIFO_DATA_REG +
 				  SUN4I_HDMI_DDC_OFFSET,
@@ -164,8 +192,15 @@ static int fifo_transfer(struct sun4i_hdmi_i2c_drv *drv, u8 *buf, int len, bool 
 
 static int xfer_msg(struct sun4i_hdmi_i2c_drv *drv, struct i2c_msg *msg)
 {
+	unsigned int bus_busy = 0;
 	int i, len;
 	u32 reg;
+
+	regmap_field_read(drv->field_ddc_bus_busy, &bus_busy);
+	if (bus_busy) {
+		dev_err(drv->dev, "failed to transfer data, bus busy\n");
+		return -EAGAIN;
+	}
 
 	/* Set FIFO direction */
 	if (drv->variant->ddc_fifo_has_dir) {
@@ -381,6 +416,48 @@ static int sun4i_hdmi_i2c_init_regmap_fields(struct sun4i_hdmi_i2c_drv *drv)
 					drv->variant->field_ddc_sck_en);
 	if (IS_ERR(drv->field_ddc_sck_en))
 		return PTR_ERR(drv->field_ddc_sck_en);
+
+	drv->field_ddc_bus_busy =
+		devm_regmap_field_alloc(drv->dev, drv->regmap,
+					drv->variant->field_ddc_bus_busy);
+	if (IS_ERR(drv->field_ddc_bus_busy))
+		return PTR_ERR(drv->field_ddc_bus_busy);
+
+	drv->field_ddc_sda_state =
+		devm_regmap_field_alloc(drv->dev, drv->regmap,
+					drv->variant->field_ddc_sda_state);
+	if (IS_ERR(drv->field_ddc_sda_state))
+		return PTR_ERR(drv->field_ddc_sda_state);
+
+	drv->field_ddc_sck_state =
+		devm_regmap_field_alloc(drv->dev, drv->regmap,
+					drv->variant->field_ddc_sck_state);
+	if (IS_ERR(drv->field_ddc_sck_state))
+		return PTR_ERR(drv->field_ddc_sck_state);
+
+	drv->field_ddc_sda_line_ctrl =
+		devm_regmap_field_alloc(drv->dev, drv->regmap,
+					drv->variant->field_ddc_sda_line_ctrl);
+	if (IS_ERR(drv->field_ddc_sda_line_ctrl))
+		return PTR_ERR(drv->field_ddc_sda_line_ctrl);
+
+	drv->field_ddc_sck_line_ctrl =
+		devm_regmap_field_alloc(drv->dev, drv->regmap,
+					drv->variant->field_ddc_sck_line_ctrl);
+	if (IS_ERR(drv->field_ddc_sck_line_ctrl))
+		return PTR_ERR(drv->field_ddc_sck_line_ctrl);
+
+	drv->field_ddc_sda_line_ctrl_en =
+		devm_regmap_field_alloc(drv->dev, drv->regmap,
+					drv->variant->field_ddc_sda_line_ctrl_en);
+	if (IS_ERR(drv->field_ddc_sda_line_ctrl_en))
+		return PTR_ERR(drv->field_ddc_sda_line_ctrl_en);
+
+	drv->field_ddc_sck_line_ctrl_en =
+		devm_regmap_field_alloc(drv->dev, drv->regmap,
+					drv->variant->field_ddc_sck_line_ctrl_en);
+	if (IS_ERR(drv->field_ddc_sck_line_ctrl_en))
+		return PTR_ERR(drv->field_ddc_sck_line_ctrl_en);
 
 	return 0;
 }
