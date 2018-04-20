@@ -1,0 +1,33 @@
+Linux rfkill-gpio Bindings
+--------------------------
+
+This binding provides support the rfkill via an gpio interface.
+
+Note: Only one of the gpios definitions is required. If both are set, both
+will be toggled uppon rfkill invocation.
+
+Required properties:
+- compatible		Should be one of:
+				"linux,rfkill-gpio"
+- type			Shall be one of:
+				"wlan"
+				"bluetooth"
+				"ultrawideband"
+				"wimax"
+				"wwan"
+				"gps"
+				"fm"
+				"nfc"
+			If left undefined, the 'RFKILL_TYPE_ALL' type
+			shall be used.
+
+- shutdown-gpios	Which GPIO to use for shutdown
+or
+- reset-gpios		Which GPIO to use for reset
+
+Example:
+       phy0-kill {
+               compatible = "linux,rfkill-gpio";
+               type = "wlan";
+               shutdown-gpios = <&pio 2 17 GPIO_ACTIVE_HIGH>;
+       };

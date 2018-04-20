@@ -21,8 +21,11 @@
 #include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/init.h>
+#include <linux/kconfig.h>
 #include <linux/kernel.h>
+#include <linux/mod_devicetable.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/rfkill.h>
 #include <linux/slab.h>
@@ -170,12 +173,21 @@ static const struct acpi_device_id rfkill_acpi_match[] = {
 MODULE_DEVICE_TABLE(acpi, rfkill_acpi_match);
 #endif
 
+#if IS_ENABLED(CONFIG_OF)
+static const struct of_device_id rfkill_of_match[] = {
+	{ .compatible = "linux,rfkill-gpio", },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, rfkill_of_match);
+#endif
+
 static struct platform_driver rfkill_gpio_driver = {
 	.probe = rfkill_gpio_probe,
 	.remove = rfkill_gpio_remove,
 	.driver = {
 		.name = "rfkill_gpio",
 		.acpi_match_table = ACPI_PTR(rfkill_acpi_match),
+		.of_match_table = of_match_ptr(rfkill_of_match),
 	},
 };
 
