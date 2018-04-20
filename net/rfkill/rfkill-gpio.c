@@ -16,16 +16,16 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#include <linux/acpi.h>
+#include <linux/clk.h>
 #include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/rfkill.h>
 #include <linux/platform_device.h>
-#include <linux/clk.h>
+#include <linux/rfkill.h>
 #include <linux/slab.h>
-#include <linux/acpi.h>
-#include <linux/gpio/consumer.h>
 
 struct rfkill_gpio_data {
 	const char		*name;
