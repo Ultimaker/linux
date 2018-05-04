@@ -43,6 +43,7 @@ static uint16_t delay;
 static int verbose;
 static int transfer_size;
 static int iterations;
+static int bridge;
 static int interval = 5; /* interval in seconds for showing transfer rate */
 
 uint8_t default_tx[] = {
@@ -125,7 +126,7 @@ static void transfer(int fd, uint8_t const *tx, uint8_t const *rx, size_t len)
 		.speed_hz = speed,
 		.bits_per_word = bits,
 	};
-
+	// printf("spidev_test.transfer: len=%d", len);
 	if (mode & SPI_TX_QUAD)
 		tr.tx_nbits = 4;
 	else if (mode & SPI_TX_DUAL)
@@ -174,6 +175,7 @@ static void print_usage(const char *prog)
 	     "  -i --input    input data from a file (e.g. \"test.bin\")\n"
 	     "  -o --output   output data to a file (e.g. \"results.bin\")\n"
 	     "  -l --loop     loopback\n"
+	     "  -B --bridge   external loopback (bridge present from MISO to MOSI)\n"
 	     "  -H --cpha     clock phase\n"
 	     "  -O --cpol     clock polarity\n"
 	     "  -L --lsb      least significant bit first\n"
@@ -201,6 +203,7 @@ static void parse_opts(int argc, char *argv[])
 			{ "input",   1, 0, 'i' },
 			{ "output",  1, 0, 'o' },
 			{ "loop",    0, 0, 'l' },
+			{ "bridge",  0, 0, 'B' }, // external bridge
 			{ "cpha",    0, 0, 'H' },
 			{ "cpol",    0, 0, 'O' },
 			{ "lsb",     0, 0, 'L' },
@@ -217,7 +220,7 @@ static void parse_opts(int argc, char *argv[])
 		};
 		int c;
 
-		c = getopt_long(argc, argv, "D:s:d:b:i:o:lHOLC3NR24p:vS:I:",
+		c = getopt_long(argc, argv, "D:s:d:b:i:o:lBHOLC3NR24p:vS:I:",
 				lopts, NULL);
 
 		if (c == -1)
@@ -283,6 +286,9 @@ static void parse_opts(int argc, char *argv[])
 			break;
 		case 'I':
 			iterations = atoi(optarg);
+			break;
+		case 'B':
+			bridge = 1;
 			break;
 		default:
 			print_usage(argv[0]);
@@ -371,24 +377,34 @@ static void transfer_buf(int fd, int len)
 {
 	uint8_t *tx;
 	uint8_t *rx;
-	int i;
+	int i, len2 = 0;
 
-	tx = malloc(len);
+	if (input_tx) len2 = strlen(input_tx);
+	if (len > len2) len2 = len;
+
+	tx = malloc(len2);
 	if (!tx)
 		pabort("can't allocate tx buffer");
-	for (i = 0; i < len; i++)
-		tx[i] = random();
 
-	rx = malloc(len);
+	rx = malloc(len2);
 	if (!rx)
 		pabort("can't allocate rx buffer");
+
+	if (input_tx) {
+		memset(tx, 0, len); // first few? of these will get overwritten...
+		len2 = unescape((char *)tx, input_tx, strlen(input_tx));
+		if (len2 > len) len = len2;
+	}
+	else {
+		for (i = 0; i < len; i++) tx[i] = random();
+	}
 
 	transfer(fd, tx, rx, len);
 
 	_write_count += len;
 	_read_count += len;
 
-	if (mode & SPI_LOOP) {
+	if ((mode & SPI_LOOP) || bridge) {
 		if (memcmp(tx, rx, len)) {
 			fprintf(stderr, "transfer error !\n");
 			hex_dump(tx, len, 32, "TX");
@@ -447,16 +463,16 @@ int main(int argc, char *argv[])
 
 	printf("spi mode: 0x%x\n", mode);
 	printf("bits per word: %d\n", bits);
-	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
+	printf("max speed: %d Hz (= %d KHz = %.3f MHz)\n", speed, speed/1000, speed/1000000.);
 
 	if (input_tx && input_file)
 		pabort("only one of -p and --input may be selected");
 
-	if (input_tx)
+	if (input_tx && !iterations)
 		transfer_escaped_string(fd, input_tx);
 	else if (input_file)
 		transfer_file(fd, input_file);
-	else if (transfer_size) {
+	else if (transfer_size || input_tx) {
 		struct timespec last_stat;
 
 		clock_gettime(CLOCK_MONOTONIC, &last_stat);
