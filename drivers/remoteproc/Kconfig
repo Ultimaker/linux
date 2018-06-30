@@ -12,6 +12,20 @@ config REMOTEPROC
 
 if REMOTEPROC
 
+config AVR_REMOTEPROC
+	tristate "AVR remoteproc support"
+	help
+	  Say y here to support AVR as remote processors
+	  via the remote processor framework.
+
+	  A firmware file must reside in the /lib/firmware/avr/ directory.
+	  The filename can also be specified via the module parameter
+	  avr_fw_name=<filename>, and if not specified will default to
+	  "avr-rproc.fw".
+
+	  To compile this driver as a module, choose M here the module will
+	  be called avr-rproc.ko it's also safe to say N here.
+
 config IMX_REMOTEPROC
 	tristate "IMX6/7 remoteproc support"
 	depends on SOC_IMX6SX || SOC_IMX7D
