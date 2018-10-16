@@ -43,7 +43,7 @@ static uint16_t delay;
 static int verbose;
 static int transfer_size;
 static int iterations;
-static int bridge;
+static int bridge;  /* option meaning MOSI and MISO have been deliberately shorted for testing purposes. */
 static int interval = 5; /* interval in seconds for showing transfer rate */
 
 uint8_t default_tx[] = {
