@@ -1269,8 +1269,8 @@ static int imx_startup(struct uart_port *port)
 	writel(temp & ~UCR4_DREN, sport->port.membase + UCR4);
 
 	/* Can we enable the DMA support? */
-	if (!uart_console(port) && !sport->dma_is_inited)
-		imx_uart_dma_init(sport);
+	//if (!uart_console(port) && !sport->dma_is_inited)
+	//	imx_uart_dma_init(sport);
 
 	spin_lock_irqsave(&sport->port.lock, flags);
 	/* Reset fifo's and state machines */
