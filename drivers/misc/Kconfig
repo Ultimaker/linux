@@ -449,6 +449,13 @@ config USB_SWITCH_FSA9480
 	  stereo and mono audio, video, microphone and UART data to use
 	  a common connector port.
 
+config BOARDDATA
+	tristate "BOARDDATA"
+	depends on I2C
+	help
+	  The BOARDDATA reads boardinformation from an I2C eeprom
+	  and makes it accessible via sysFS.
+
 config LATTICE_ECP3_CONFIG
 	tristate "Lattice ECP3 FPGA bitstream configuration via SPI"
 	depends on SPI && SYSFS
