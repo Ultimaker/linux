@@ -183,45 +183,51 @@ static ssize_t serial_number_show(struct class *class, struct class_attribute *a
 	struct s_boarddata *boarddata = (struct s_boarddata *)class->p;
 	return sprintf(buf, "%s\n", boarddata->serial_number);
 }
+static CLASS_ATTR_RO(serial_number);
 
 static ssize_t product_name_show(struct class *class, struct class_attribute *attr,char *buf)
 {
 	struct s_boarddata *boarddata = (struct s_boarddata *)class->p;
 	return sprintf(buf, "%s\n", boarddata->product_name);
 }
+static CLASS_ATTR_RO(product_name);
 
 static ssize_t variant_key_show(struct class *class, struct class_attribute *attr, char *buf)
 {
 	struct s_boarddata *boarddata = (struct s_boarddata *)class->p;
 	return sprintf(buf, "%s\n", boarddata->variant_key);
 }
+static CLASS_ATTR_RO(variant_key);
 
 static ssize_t feature_key_show(struct class *class, struct class_attribute *attr, char *buf)
 {
 	struct s_boarddata *boarddata = (struct s_boarddata *)class->p;
 	return sprintf(buf, "%s\n", boarddata->feature_key);
 }
+static CLASS_ATTR_RO(feature_key);
 
 static ssize_t revision_show(struct class *class, struct class_attribute *attr, char *buf)
 {
 	struct s_boarddata *boarddata = (struct s_boarddata *)class->p;
 	return sprintf(buf, "%s\n", boarddata->revision);
 }
+static CLASS_ATTR_RO(revision);
 
-static struct class_attribute boarddata_class_attrs[] = {
-	__ATTR(product_name,  0444, product_name_show,  NULL),
-	__ATTR(variant_key,   0444, variant_key_show,   NULL),
-	__ATTR(feature_key,   0444, feature_key_show,   NULL),
-	__ATTR(revision,      0444, revision_show,      NULL),
-	__ATTR(serial_number, 0444, serial_number_show, NULL),
-	__ATTR_NULL,
+static struct attribute *boarddata_class_attrs[] = {
+	&class_attr_serial_number.attr,
+	&class_attr_product_name.attr,
+	&class_attr_variant_key.attr,
+	&class_attr_feature_key.attr,
+	&class_attr_revision.attr,
+	NULL,
 };
+ATTRIBUTE_GROUPS(boarddata_class);
 
 static struct class boarddata_class = {
 	.name =	"boarddata",
 	.owner =	THIS_MODULE,
 
-	.class_attrs =	boarddata_class_attrs,
+	.class_groups =	boarddata_class_groups,
 };
 
 
