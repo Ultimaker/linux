@@ -6,7 +6,6 @@
  * Licensed under the GPLv2 or later.
  */
 
-#include <linux/bitops.h>
 #include <linux/backlight.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -33,30 +32,14 @@
 #define SSD1307FB_CONTRAST		0x81
 #define	SSD1307FB_CHARGE_PUMP		0x8d
 #define SSD1307FB_SEG_REMAP_ON		0xa1
-#define _SSD1307FB_CHARGE_PUMP_SET	0x10
-#define SSD1307FB_CHARGE_PUMP_SET(pump)	\
-	((_SSD1307FB_CHARGE_PUMP_SET) | \
-	 ((pump) ? BIT(2) : 0))
 #define SSD1307FB_DISPLAY_OFF		0xae
 #define SSD1307FB_SET_MULTIPLEX_RATIO	0xa8
 #define SSD1307FB_DISPLAY_ON		0xaf
 #define SSD1307FB_START_PAGE_ADDRESS	0xb0
 #define SSD1307FB_SET_DISPLAY_OFFSET	0xd3
 #define	SSD1307FB_SET_CLOCK_FREQ	0xd5
-#define SSD1307FB_CLOCK_FREQ(freq, div)	\
-	((((freq) << 4) & GENMASK(7, 4)) | \
-	 (((((div) - 1) << 0) & GENMASK(3, 0))))
 #define	SSD1307FB_SET_PRECHARGE_PERIOD	0xd9
-#define SSD1307FB_PRECHARGE_PERIOD(period1, period2) \
-	((((period2 << 4) & GENMASK(7, 4) )) | \
-	 (((period1) << 0) & GENMASK(3, 0)))
 #define	SSD1307FB_SET_COM_PINS_CONFIG	0xda
-#define	_SSD1307FB_COM_PINS_CONFIG	0x02
-#define	SSD1307FB_COM_PINS_CONFIG(com_seq, com_lrremap) \
-	((_SSD1307FB_COM_PINS_CONFIG) | \
-	 ((com_lrremap) ? BIT(5) : 0) | \
-	 ((com_seq) ? 0 : BIT(4)))
-
 #define	SSD1307FB_SET_VCOMH		0xdb
 
 #define MAX_CONTRAST 255
@@ -306,7 +289,7 @@ static void ssd1307fb_deferred_io(struct fb_info *info,
 static int ssd1307fb_init(struct ssd1307fb_par *par)
 {
 	int ret;
-	u8 cmd;
+	u32 precharge, dclk, com_invdir, compins;
 	struct pwm_args pargs;
 	char status;
 	struct device *dev = &par->client->dev;
@@ -387,8 +370,8 @@ static int ssd1307fb_init(struct ssd1307fb_par *par)
 	if (ret < 0)
 		return ret;
 
-	cmd = SSD1307FB_CLOCK_FREQ(par->dclk_frq, par->dclk_div);
-	ret = ssd1307fb_write_cmd(par->client, cmd);
+	dclk = ((par->dclk_div - 1) & 0xf) | (par->dclk_frq & 0xf) << 4;
+	ret = ssd1307fb_write_cmd(par->client, dclk);
 	if (ret < 0)
 		return ret;
 
@@ -397,8 +380,8 @@ static int ssd1307fb_init(struct ssd1307fb_par *par)
 	if (ret < 0)
 		return ret;
 
-	cmd = SSD1307FB_PRECHARGE_PERIOD(par->prechargep1, par->prechargep2);
-	ret = ssd1307fb_write_cmd(par->client, cmd);
+	precharge = (par->prechargep1 & 0xf) | (par->prechargep2 & 0xf) << 4;
+	ret = ssd1307fb_write_cmd(par->client, precharge);
 	if (ret < 0)
 		return ret;
 
@@ -407,8 +390,9 @@ static int ssd1307fb_init(struct ssd1307fb_par *par)
 	if (ret < 0)
 		return ret;
 
-	cmd = SSD1307FB_COM_PINS_CONFIG(par->com_seq, par->com_lrremap);
-	ret = ssd1307fb_write_cmd(par->client, cmd);
+	compins = 0x02 | !(par->com_seq & 0x1) << 4
+				   | (par->com_lrremap & 0x1) << 5;
+	ret = ssd1307fb_write_cmd(par->client, compins);
 	if (ret < 0)
 		return ret;
 
@@ -426,8 +410,8 @@ static int ssd1307fb_init(struct ssd1307fb_par *par)
 	if (ret < 0)
 		return ret;
 
-	cmd = SSD1307FB_CHARGE_PUMP_SET(par->device_info->need_chargepump);
-	ret = ssd1307fb_write_cmd(par->client, cmd);
+	ret = ssd1307fb_write_cmd(par->client,
+		BIT(4) | (par->device_info->need_chargepump ? BIT(2) : 0));
 	if (ret < 0)
 		return ret;
 
