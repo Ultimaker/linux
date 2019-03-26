@@ -66,6 +66,8 @@
 static u_int refreshrate = REFRESHRATE;
 module_param(refreshrate, uint, 0);
 
+struct ssd1307fb_par;
+
 struct ssd1307fb_deviceinfo {
 	u32 default_vcomh;
 	u32 default_dclk_div;
