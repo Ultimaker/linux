@@ -17,9 +17,10 @@
 
 void fb_parse_properties(struct device *dev, struct fb_of_properties *prop)
 {
+	bool clear;
 	u16 rotate;
 
-	prop->no_clear_on_probe = device_property_read_bool(dev, "no-clear-on-probe");
+	clear = device_property_read_bool(dev, "clear-on-probe");
 
 	if (device_property_read_u16(dev, "rotate", &rotate))
 		rotate = FB_ROTATE_UR;
