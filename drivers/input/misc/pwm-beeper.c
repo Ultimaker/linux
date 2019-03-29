@@ -67,10 +67,21 @@ static int pwm_beeper_on(struct pwm_beeper *beeper, unsigned long period)
 
 static void pwm_beeper_off(struct pwm_beeper *beeper)
 {
+	struct pwm_state state;
+
 	if (beeper->amplifier_on) {
 		regulator_disable(beeper->amplifier);
 		beeper->amplifier_on = false;
 	}
+
+	/*
+	 * When disabling, some PWM hardware IP leaves the pin in the state it
+	 * happens to be in. To make sure it is in the inactive state, set the
+	 * duty cycle to 0 first.
+	 */
+	pwm_get_state(beeper->pwm, &state);
+	state.duty_cycle = 0;
+	pwm_apply_state(beeper->pwm, &state);
 
 	pwm_disable(beeper->pwm);
 }
