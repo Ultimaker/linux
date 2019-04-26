@@ -788,6 +788,10 @@ static int pca953x_probe(struct i2c_client *client,
 						     GPIOD_OUT_LOW);
 		if (IS_ERR(reset_gpio))
 			return PTR_ERR(reset_gpio);
+
+		if (reset_gpio)
+			/* Bring chip out of reset */
+			gpiod_set_value(reset_gpio, 0);
 	}
 
 	chip->client = client;
