@@ -1438,6 +1438,9 @@ static int fsl_flexspi_probe(struct platform_device *pdev)
 		else
 			hwcaps.mask |= SNOR_HWCAPS_READ;
 
+		if (of_property_read_bool(np, "spi-nor,quad-read"))
+		  hwcaps.mask |= SNOR_HWCAPS_READ_1_1_4;
+
 		/* set the chip address for READID */
 		fsl_flexspi_set_base_addr(flex, nor);
 
