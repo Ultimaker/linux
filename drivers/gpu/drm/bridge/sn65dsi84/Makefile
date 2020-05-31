@@ -1,0 +1,2 @@
+obj-$(CONFIG_DRM_TI_SN65DSI84) += sn65dsi84.o
+

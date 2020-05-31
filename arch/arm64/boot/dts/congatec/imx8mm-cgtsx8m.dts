@@ -846,6 +846,27 @@
 	pinctrl-0 = <&pinctrl_i2c4>;
 	status = "okay";
 
+	/* DSI-LVDS bridge */
+	lvdsbridge: sn65dsi84@2c {
+		reg = <0x2c>;
+		status = "disabled";
+		compatible = "ti,sn65dsi84";
+		pd = <&gpio1 8 GPIO_ACTIVE_HIGH>;
+		bckl = <&gpio1 1 GPIO_ACTIVE_HIGH>;
+		/* DSI parameters */
+		adi,dsi-lanes = <4>;
+		//adi,dsi-clock = <222750000>; /*in Hz*/
+		adi,dsi-clock = <594000000>;
+
+		lvds,use-uboot-settings; // will get replaced by lvds props
+		
+		port {
+			lvds_bridge_from_dsim: endpoint {
+				remote-endpoint = <&dsim_to_lvds_bridge>;
+			};
+		};
+	};
+
 	/* RTC clock */
 	m41t62: rtc@68 {
 		compatible = "st,m41t62";
@@ -853,6 +874,25 @@
 	};
 };
 
+&lcdif {
+	status = "okay";
+};
+
+&mipi_dsi {
+	status = "okay";
+	as_bridge;
+	sync-pol = <1>;
+	pwr-delay = <10>;
+	pref-rate = <26000>;
+
+	port@1 {
+		pref-rate = <26100>;
+		dsim_to_lvds_bridge: endpoint {
+			pref-rate = <26200>;
+			remote-endpoint = <&lvds_bridge_from_dsim>; 
+		};
+	};
+};
 
 &mu {
 	status = "okay";
@@ -1005,3 +1045,18 @@
 	arm-supply = <&buck2_reg>;
 };
 
+&gpu {
+	status = "okay";
+};
+
+&vpu_g1 {
+	status = "okay";
+};
+
+&vpu_g2 {
+	status = "okay";
+};
+
+&vpu_h1 {
+	status = "okay";
+};
