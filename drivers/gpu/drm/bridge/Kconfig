@@ -136,4 +136,13 @@ config DRM_ITE_IT6263
 	---help---
 	  ITE IT6263 bridge chip driver.
 
+config DRM_TI_SN65DSI86
+    tristate "SN65DSI86 DSI to eDP bridge"
+	depends on OF
+	select DRM_KMS_HELPER
+    select REGMAP_I2C
+    help
+      Support for the Texas Intruments SN65DSI86 DSI to embedded display port bridge.
+
+
 endmenu

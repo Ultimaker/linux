@@ -1,0 +1,38 @@
+/*
+ * Copyright 2018 NXP
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/dts-v1/;
+
+#include "imx8mm-cgtsx8m.dts"
+
+&i2c4 {
+	dpbridge: sn65dsi86@2d {
+		status = "okay";
+		
+		/delete-property/ dp,use-uboot-settings; // will get replaced by dp props
+
+		/* dp setting 800x600 75Hz pixclk 49.5Mhz syn polarity +/+ */
+		dp,pixelclock = <49500000>;
+		dp,hactive = <800>;
+		dp,vactive = <600>;
+		dp,hfront_porch = <16>; //<24>;
+		dp,hback_porch = <80>; //<160>
+		dp,hsync_len = <160>;
+		dp,vfront_porch = <1>;
+		dp,vback_porch = <21>;
+		dp,vsync_len = <2>;
+		dp,hsyn_positive;
+		dp,vsyn_positive;
+	};
+};

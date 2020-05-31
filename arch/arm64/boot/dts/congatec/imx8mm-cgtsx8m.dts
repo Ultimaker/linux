@@ -867,6 +867,25 @@
 		};
 	};
 
+	dpbridge: sn65dsi86@2d {
+		reg = <0x2d>;
+		status = "disabled";
+		compatible = "ti,sn65dsi86";
+		enable-gpios = <&gpio1 8 GPIO_ACTIVE_HIGH>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <9 IRQ_TYPE_LEVEL_HIGH>;
+		// use this to enable set mode by EDID
+		// dp,use-edid-data;
+
+		dp,use-uboot-settings; // will get replaced by dp props
+
+		port {
+			dp_bridge_from_dsim: endpoint {
+				remote-endpoint = <&dsim_to_dp_bridge>;
+			};
+		};
+	};
+
 	/* RTC clock */
 	m41t62: rtc@68 {
 		compatible = "st,m41t62";
@@ -890,6 +909,14 @@
 		dsim_to_lvds_bridge: endpoint {
 			pref-rate = <26200>;
 			remote-endpoint = <&lvds_bridge_from_dsim>; 
+		};
+	};
+
+	port@2 {
+		pref-rate = <26100>;
+		dsim_to_dp_bridge: endpoint {
+			pref-rate = <26200>;
+			remote-endpoint = <&dp_bridge_from_dsim>; 
 		};
 	};
 };
