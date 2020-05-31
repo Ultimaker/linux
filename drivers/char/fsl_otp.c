@@ -600,7 +600,8 @@ static ssize_t fsl_otp_store(struct kobject *kobj, struct kobj_attribute *attr,
 		goto out;
 
 	if (fsl_otp->devtype == FSL_OTP_MX7D)
-		imx7_otp_write_bits(index, value, 0x3e77);
+		//imx7_otp_write_bits(index, value, 0x3e77);
+		imx6_otp_write_bits(index, value, 0x3e77);
 	else if (fsl_otp->devtype == FSL_OTP_MX7ULP)
 		imx7ulp_otp_write_bits(index, value, 0x3e77);
 	else
