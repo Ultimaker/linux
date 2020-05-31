@@ -126,6 +126,25 @@
 			enable-active-low;
 		};
 	};
+
+	sound-wm8904 {
+		compatible = "fsl,imx-audio-wm8904";
+		model = "wm8904-audio";
+		cpu-dai = <&sai5>;
+		audio-codec = <&wm8904>;
+		codec-master;
+		audio-routing =
+			"Headphone Jack", "HPOUTL",
+			"Headphone Jack", "HPOUTR",
+			"Line Out Jack", "LINEOUTL",
+			"Line Out Jack", "LINEOUTR",
+			"IN1L", "Line In Jack",
+			"IN1R", "Line In Jack",
+			"IN2R", "Main MIC",
+			"Playback", "CPU-Playback",
+			"CPU-Capture", "Capture";
+	};
+
 };
 
 &clk {
@@ -783,6 +802,13 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_i2c3>;
 	status = "okay";
+
+	wm8904: codec@1a {
+		compatible = "wlf,wm8904";
+		reg = <0x1a>;
+		clocks = <&clk IMX8MM_CLK_SAI5_ROOT>;
+		clock-names = "mclk";
+	};
 
 	 ov5640_mipi: ov5640_mipi@3c {
 		compatible = "ovti,ov5640_mipi";
