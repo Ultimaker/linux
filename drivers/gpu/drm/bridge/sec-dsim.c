@@ -1255,6 +1255,21 @@ struct dsim_pll_pms *sec_mipi_dsim_calc_pmsk(struct sec_mipi_dsim *dsim)
 	return pll_pms;
 }
 
+/* Allow to force dsi frequency another drivers */
+static u32 dsi_freq = 0;
+
+void sec_mipi_force_freq(u32 freq)
+{
+	dsi_freq = freq;
+}
+EXPORT_SYMBOL(sec_mipi_force_freq);
+
+void sec_mipi_release_freq(void)
+{
+	dsi_freq = 0;
+}
+EXPORT_SYMBOL(sec_mipi_release_freq);
+
 int sec_mipi_dsim_check_pll_out(void *driver_private,
 				const struct drm_display_mode *mode)
 {
@@ -1279,7 +1294,12 @@ int sec_mipi_dsim_check_pll_out(void *driver_private,
 	}
 
 	dsim->pix_clk = pix_clk;
-	dsim->bit_clk = bit_clk;
+	/* if clock should be overridden then set overridden value */
+	if (dsi_freq) {
+		dsim->bit_clk = dsi_freq;
+	} else {
+		dsim->bit_clk = bit_clk;
+	}
 	dsim->hpar = NULL;
 
 	pmsk = sec_mipi_dsim_calc_pmsk(dsim);
@@ -1293,6 +1313,12 @@ int sec_mipi_dsim_check_pll_out(void *driver_private,
 	dsim->pms = PLLCTRL_SET_P(pmsk->p) |
 		    PLLCTRL_SET_M(pmsk->m) |
 		    PLLCTRL_SET_S(pmsk->s);
+
+	/* restore value for other calculations */
+	if (dsi_freq) {
+		dsim->bit_clk = bit_clk;
+	}
+
 
 	if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO_SYNC_PULSE) {
 		hpar = sec_mipi_dsim_get_hblank_par(mode->name,
@@ -1953,6 +1979,8 @@ void sec_mipi_dsim_unbind(struct device *dev, struct device *master, void *data)
 		drm_connector_cleanup(&dsim->connector);
 		dsim->panel = NULL;
 	}
+
+	sec_mipi_release_freq();
 
 	mipi_dsi_host_unregister(&dsim->dsi_host);
 }
