@@ -16,6 +16,7 @@
  */
 
 #include <linux/bitops.h>
+#include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
 #include <linux/init.h>
@@ -258,6 +259,7 @@ static int vf610_gpio_probe(struct platform_device *pdev)
 							   &pdev->dev);
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
+	struct clk *clk_port, *clk_gpio;
 	struct vf610_gpio_port *port;
 	struct resource *iores;
 	struct gpio_chip *gc;
@@ -282,6 +284,23 @@ static int vf610_gpio_probe(struct platform_device *pdev)
 	if (port->irq < 0)
 		return port->irq;
 
+	clk_port = devm_clk_get(&pdev->dev, "port");
+	clk_gpio = devm_clk_get(&pdev->dev, "gpio");
+	if (PTR_ERR(clk_port) == -EPROBE_DEFER ||
+	    PTR_ERR(clk_gpio) == -EPROBE_DEFER)
+		return -EPROBE_DEFER;
+
+	if (!IS_ERR(clk_port) && !IS_ERR(clk_gpio)) {
+		ret = clk_prepare_enable(clk_port);
+		if (ret)
+			return ret;
+		ret = clk_prepare_enable(clk_gpio);
+		if (ret) {
+			clk_disable_unprepare(clk_port);
+			return ret;
+		}
+	}
+
 	gc = &port->gc;
 	gc->of_node = np;
 	gc->parent = dev;
@@ -302,6 +321,14 @@ static int vf610_gpio_probe(struct platform_device *pdev)
 
 	/* Clear the interrupt status register for all GPIO's */
 	vf610_gpio_writel(~0, port->base + PORT_ISFR);
+
+	/*
+	 * At imx7ulp, any interrupts can wake system up from "standby" mode,
+	 * so, mask interrupt at suspend mode by default, and the user
+	 * can still enable wakeup through /sys entry.
+	 */
+	if (of_machine_is_compatible("fsl,imx7ulp"))
+		vf610_gpio_irq_chip.flags = IRQCHIP_MASK_ON_SUSPEND;
 
 	ret = gpiochip_irqchip_add(gc, &vf610_gpio_irq_chip, 0,
 				   handle_edge_irq, IRQ_TYPE_NONE);

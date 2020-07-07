@@ -1,0 +1,21 @@
+config DRM_TI_SN65DSI84
+	tristate "sn65dsi84 bridge"
+	depends on OF
+	select DRM_KMS_HELPER
+	select REGMAP_I2C
+	help
+	  Support for the TI SN65DSI84 LVDS Bridge.
+
+config DRM_SNDEBUG
+	bool "Debug for SN65dsi84"
+	default n
+	depends on DRM_TI_SN65DSI84
+	help
+		debug with sysfs 
+		
+config DRM_PRNDEBUG
+	bool "Printk debug for SN65DSI84"
+	default n
+	depends on DRM_SNDEBUG
+	help
+		debug with printk 		

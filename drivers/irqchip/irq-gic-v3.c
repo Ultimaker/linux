@@ -62,6 +62,8 @@ struct gic_chip_data {
 static struct gic_chip_data gic_data __read_mostly;
 static struct static_key supports_deactivate = STATIC_KEY_INIT_TRUE;
 
+static void __iomem *iomuxc_gpr_base;
+
 static struct gic_kvm_info gic_v3_kvm_info;
 
 #define gic_data_rdist()		(this_cpu_ptr(gic_data.rdists.rdist))
@@ -645,13 +647,14 @@ static void gic_send_sgi(u64 cluster_id, u16 tlist, unsigned int irq)
 	       MPIDR_TO_SGI_AFFINITY(cluster_id, 1)	|
 	       tlist << ICC_SGI1R_TARGET_LIST_SHIFT);
 
-	pr_debug("CPU%d: ICC_SGI1R_EL1 %llx\n", smp_processor_id(), val);
+	pr_devel("CPU%d: ICC_SGI1R_EL1 %llx\n", smp_processor_id(), val);
 	gic_write_sgi1r(val);
 }
 
 static void gic_raise_softirq(const struct cpumask *mask, unsigned int irq)
 {
 	int cpu;
+	u32 val;
 
 	if (WARN_ON(irq >= 16))
 		return;
@@ -668,8 +671,18 @@ static void gic_raise_softirq(const struct cpumask *mask, unsigned int irq)
 
 		tlist = gic_compute_target_list(&cpu, mask, cluster_id);
 		gic_send_sgi(cluster_id, tlist, irq);
-	}
 
+		if (iomuxc_gpr_base) {
+			/* pending the IRQ32 to wakeup the core */
+			val = readl_relaxed(iomuxc_gpr_base + 0x4);
+			val |= (1 << 12);
+			writel_relaxed(val, iomuxc_gpr_base + 0x4);
+			/* delay for a while to make sure cores wakeup done */
+			udelay(50);
+			val &= ~(1 << 12);
+			writel_relaxed(val, iomuxc_gpr_base + 0x4);
+		}
+	}
 	/* Force the above writes to ICC_SGI1R_EL1 to be executed */
 	isb();
 }
@@ -772,7 +785,9 @@ static struct irq_chip gic_chip = {
 	.irq_set_affinity	= gic_set_affinity,
 	.irq_get_irqchip_state	= gic_irq_get_irqchip_state,
 	.irq_set_irqchip_state	= gic_irq_set_irqchip_state,
-	.flags			= IRQCHIP_SET_TYPE_MASKED,
+	.flags			= IRQCHIP_SET_TYPE_MASKED |
+				  IRQCHIP_SKIP_SET_WAKE |
+				  IRQCHIP_MASK_ON_SUSPEND,
 };
 
 static struct irq_chip gic_eoimode1_chip = {
@@ -785,7 +800,9 @@ static struct irq_chip gic_eoimode1_chip = {
 	.irq_get_irqchip_state	= gic_irq_get_irqchip_state,
 	.irq_set_irqchip_state	= gic_irq_set_irqchip_state,
 	.irq_set_vcpu_affinity	= gic_irq_set_vcpu_affinity,
-	.flags			= IRQCHIP_SET_TYPE_MASKED,
+	.flags			= IRQCHIP_SET_TYPE_MASKED |
+				  IRQCHIP_SKIP_SET_WAKE |
+				  IRQCHIP_MASK_ON_SUSPEND,
 };
 
 #define GIC_ID_NR		(1U << gic_data.rdists.id_bits)
@@ -1222,6 +1239,12 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 		rdist_regs[i].phys_base = res.start;
 	}
 
+	if (of_machine_is_compatible("fsl,imx8mq")) {
+		/* sw workaround for IPI can't wakeup CORE
+		   ERRATA(ERR011171) on i.MX8MQ */
+		iomuxc_gpr_base = of_iomap(node, 2);
+	}
+
 	if (of_property_read_u64(node, "redistributor-stride", &redist_stride))
 		redist_stride = 0;
 
@@ -1297,6 +1320,10 @@ gic_acpi_parse_madt_gicc(struct acpi_subtable_header *header,
 	u32 size = reg == GIC_PIDR2_ARCH_GICv4 ? SZ_64K * 4 : SZ_64K * 2;
 	void __iomem *redist_base;
 
+	/* GICC entry which has !ACPI_MADT_ENABLED is not unusable so skip */
+	if (!(gicc->flags & ACPI_MADT_ENABLED))
+		return 0;
+
 	redist_base = ioremap(gicc->gicr_base_address, size);
 	if (!redist_base)
 		return -ENOMEM;
@@ -1344,6 +1371,13 @@ static int __init gic_acpi_match_gicc(struct acpi_subtable_header *header,
 	 * GICR base is presented via GICC
 	 */
 	if ((gicc->flags & ACPI_MADT_ENABLED) && gicc->gicr_base_address)
+		return 0;
+
+	/*
+	 * It's perfectly valid firmware can pass disabled GICC entry, driver
+	 * should not treat as errors, skip the entry instead of probe fail.
+	 */
+	if (!(gicc->flags & ACPI_MADT_ENABLED))
 		return 0;
 
 	return -ENODEV;

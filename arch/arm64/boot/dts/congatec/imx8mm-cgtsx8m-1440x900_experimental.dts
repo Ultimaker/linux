@@ -1,0 +1,44 @@
+/*
+ * Copyright 2018 NXP
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/dts-v1/;
+
+#include "imx8mm-cgtsx8m.dts"
+&i2c4 {
+	/* DSI-LVDS bridge */
+	lvdsbridge: sn65dsi84@2c {
+		status = "okay";
+
+		/delete-property/ lvds,use-uboot-settings; // will get replaced by dp props
+
+		/* LVDS: 1440x900 */
+		lvds,pixelclock = <118800000>;
+		lvds,hactive = <1440>;	
+		lvds,vactive = <900>;
+		lvds,hfront_porch = <80>;
+		lvds,hback_porch = <232>;
+		lvds,hsync_len = <152>;
+		lvds,hsync_pol = <0>; /* 0 - negative, 1 - positive */
+		lvds,vfront_porch = <1>;
+		lvds,vback_porch = <28>;
+		lvds,vsync_len = <3>;
+		lvds,vsync_pol= <1>; /* 0 - negative, 1 - positive */
+		lvds,color_depth = "rgb24";
+		/* lvds,color_depth = "rgb18";*/
+		lvds,datamap = "spwg"; 
+		/* lvds,datamap = "jeida"; */
+		/* lvds,dual-channel; */
+		/* lvds,test-mode; */	
+	};
+};

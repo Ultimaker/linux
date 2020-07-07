@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2014-2015 Freescale Semiconductor, Inc.
+ * Copyright 2017 NXP.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -80,10 +81,10 @@
 #define IMX7D_ARM_M4_ROOT_SRC		67
 #define IMX7D_ARM_M4_ROOT_CG		68
 #define IMX7D_ARM_M4_ROOT_DIV		69
-#define IMX7D_ARM_M0_ROOT_CLK		70
-#define IMX7D_ARM_M0_ROOT_SRC		71
-#define IMX7D_ARM_M0_ROOT_CG		72
-#define IMX7D_ARM_M0_ROOT_DIV		73
+#define IMX7D_ARM_M0_ROOT_CLK		70      /* unused */
+#define IMX7D_ARM_M0_ROOT_SRC		71      /* unused */
+#define IMX7D_ARM_M0_ROOT_CG		72      /* unused */
+#define IMX7D_ARM_M0_ROOT_DIV		73      /* unused */
 #define IMX7D_MAIN_AXI_ROOT_CLK		74
 #define IMX7D_MAIN_AXI_ROOT_SRC		75
 #define IMX7D_MAIN_AXI_ROOT_CG		76
@@ -452,5 +453,11 @@
 #define IMX7D_OCOTP_CLK			439
 #define IMX7D_NAND_RAWNAND_CLK		440
 #define IMX7D_NAND_USDHC_BUS_RAWNAND_CLK 441
-#define IMX7D_CLK_END			442
+#define IMX7D_CAAM_CLK 			442
+#define IMX7D_PXP_IPG_CLK		443
+#define IMX7D_PXP_AXI_CLK		444
+#define IMX7D_ENET1_IPG_ROOT_CLK        445
+#define IMX7D_ENET2_IPG_ROOT_CLK        446
+#define IMX7D_CLK_END			447
+
 #endif /* __DT_BINDINGS_CLOCK_IMX7D_H */

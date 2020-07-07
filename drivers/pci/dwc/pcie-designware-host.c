@@ -45,8 +45,19 @@ static int dw_pcie_wr_own_conf(struct pcie_port *pp, int where, int size,
 	return dw_pcie_write(pci->dbi_base + where, size, val);
 }
 
+static void dwc_irq_ack(struct irq_data *d)
+{
+	struct msi_desc *msi = irq_data_get_msi_desc(d);
+	struct pcie_port *pp = msi_desc_to_pci_sysdata(msi);
+	int pos = d->hwirq % 32;
+	int i = d->hwirq / 32;
+
+	dw_pcie_wr_own_conf(pp, PCIE_MSI_INTR0_STATUS + i * 12, 4, BIT(pos));
+}
+
 static struct irq_chip dw_msi_irq_chip = {
 	.name = "PCI-MSI",
+	.irq_ack = dwc_irq_ack,
 	.irq_enable = pci_msi_unmask_irq,
 	.irq_disable = pci_msi_mask_irq,
 	.irq_mask = pci_msi_mask_irq,
@@ -72,8 +83,6 @@ irqreturn_t dw_handle_msi_irq(struct pcie_port *pp)
 					    pos)) != 32) {
 			irq = irq_find_mapping(pp->irq_domain, i * 32 + pos);
 			generic_handle_irq(irq);
-			dw_pcie_wr_own_conf(pp, PCIE_MSI_INTR0_STATUS + i * 12,
-					    4, 1 << pos);
 			pos++;
 		}
 	}
@@ -83,16 +92,38 @@ irqreturn_t dw_handle_msi_irq(struct pcie_port *pp)
 
 void dw_pcie_msi_init(struct pcie_port *pp)
 {
-	u64 msi_target;
+	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+	dma_addr_t msi_addr;
 
-	pp->msi_data = __get_free_pages(GFP_KERNEL, 0);
-	msi_target = virt_to_phys((void *)pp->msi_data);
+	dma_alloc_coherent(pci->dev, 64, &msi_addr, GFP_KERNEL);
+	pp->msi_target = (u64)msi_addr;
 
 	/* program the msi_data */
 	dw_pcie_wr_own_conf(pp, PCIE_MSI_ADDR_LO, 4,
-			    (u32)(msi_target & 0xffffffff));
+			    (u32)(pp->msi_target & 0xffffffff));
 	dw_pcie_wr_own_conf(pp, PCIE_MSI_ADDR_HI, 4,
-			    (u32)(msi_target >> 32 & 0xffffffff));
+			    (u32)(pp->msi_target >> 32 & 0xffffffff));
+}
+
+void dw_pcie_msi_cfg_store(struct pcie_port *pp)
+{
+	int i;
+
+	for (i = 0; i < MAX_MSI_CTRLS; i++)
+		dw_pcie_rd_own_conf(pp, PCIE_MSI_INTR0_ENABLE + i * 12, 4,
+				&pp->msi_enable[i]);
+}
+
+void dw_pcie_msi_cfg_restore(struct pcie_port *pp)
+{
+	int i;
+
+	for (i = 0; i < MAX_MSI_CTRLS; i++) {
+		dw_pcie_wr_own_conf(pp, PCIE_MSI_ADDR_LO, 4, pp->msi_target);
+		dw_pcie_wr_own_conf(pp, PCIE_MSI_ADDR_HI, 4, 0);
+		dw_pcie_wr_own_conf(pp, PCIE_MSI_INTR0_ENABLE + i * 12, 4,
+				pp->msi_enable[i]);
+	}
 }
 
 static void dw_pcie_msi_clear_irq(struct pcie_port *pp, int irq)
@@ -182,15 +213,12 @@ no_valid_irq:
 static void dw_msi_setup_msg(struct pcie_port *pp, unsigned int irq, u32 pos)
 {
 	struct msi_msg msg;
-	u64 msi_target;
 
 	if (pp->ops->get_msi_addr)
-		msi_target = pp->ops->get_msi_addr(pp);
-	else
-		msi_target = virt_to_phys((void *)pp->msi_data);
+		pp->msi_target = pp->ops->get_msi_addr(pp);
 
-	msg.address_lo = (u32)(msi_target & 0xffffffff);
-	msg.address_hi = (u32)(msi_target >> 32 & 0xffffffff);
+	msg.address_lo = (u32)(pp->msi_target & 0xffffffff);
+	msg.address_hi = (u32)(pp->msi_target >> 32 & 0xffffffff);
 
 	if (pp->ops->get_msi_data)
 		msg.data = pp->ops->get_msi_data(pp, pos);
@@ -205,9 +233,6 @@ static int dw_msi_setup_irq(struct msi_controller *chip, struct pci_dev *pdev,
 {
 	int irq, pos;
 	struct pcie_port *pp = pdev->bus->sysdata;
-
-	if (desc->msi_attrib.is_msix)
-		return -EINVAL;
 
 	irq = assign_irq(1, desc, &pos);
 	if (irq < 0)
@@ -226,9 +251,20 @@ static int dw_msi_setup_irqs(struct msi_controller *chip, struct pci_dev *pdev,
 	struct msi_desc *desc;
 	struct pcie_port *pp = pdev->bus->sysdata;
 
-	/* MSI-X interrupts are not supported */
-	if (type == PCI_CAP_ID_MSIX)
-		return -EINVAL;
+	if (type == PCI_CAP_ID_MSIX) {
+		if ((MAX_MSI_IRQS - bitmap_weight(pp->msi_irq_in_use,
+						  MAX_MSI_IRQS)) < nvec)
+			return -ENOSPC;
+
+		for_each_pci_msi_entry(desc, pdev) {
+			int ret = dw_msi_setup_irq(chip, pdev, desc);
+
+			if (ret)
+				return ret;
+		}
+
+		return 0;
+	}
 
 	WARN_ON(!list_is_singular(&pdev->dev.msi_list));
 	desc = list_entry(pdev->dev.msi_list.next, struct msi_desc, list);
@@ -263,7 +299,7 @@ static struct msi_controller dw_pcie_msi_chip = {
 static int dw_pcie_msi_map(struct irq_domain *domain, unsigned int irq,
 			   irq_hw_number_t hwirq)
 {
-	irq_set_chip_and_handler(irq, &dw_msi_irq_chip, handle_simple_irq);
+	irq_set_chip_and_handler(irq, &dw_msi_irq_chip, handle_edge_irq);
 	irq_set_chip_data(irq, domain->host_data);
 
 	return 0;
@@ -628,9 +664,11 @@ void dw_pcie_setup_rc(struct pcie_port *pp)
 		dev_dbg(pci->dev, "iATU unroll: %s\n",
 			pci->iatu_unroll_enabled ? "enabled" : "disabled");
 
-		dw_pcie_prog_outbound_atu(pci, PCIE_ATU_REGION_INDEX0,
-					  PCIE_ATU_TYPE_MEM, pp->mem_base,
-					  pp->mem_bus_addr, pp->mem_size);
+		if (!IS_ENABLED(CONFIG_EP_MODE_IN_EP_RC_SYS)
+				&& !IS_ENABLED(CONFIG_RC_MODE_IN_EP_RC_SYS))
+			dw_pcie_prog_outbound_atu(pci, PCIE_ATU_REGION_INDEX0,
+						  PCIE_ATU_TYPE_MEM, pp->mem_base,
+						  pp->mem_bus_addr, pp->mem_size);
 		if (pci->num_viewport > 2)
 			dw_pcie_prog_outbound_atu(pci, PCIE_ATU_REGION_INDEX2,
 						  PCIE_ATU_TYPE_IO, pp->io_base,

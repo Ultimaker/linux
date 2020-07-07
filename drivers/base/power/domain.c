@@ -247,6 +247,9 @@ static int _genpd_power_on(struct generic_pm_domain *genpd, bool timed)
 	if (!genpd->power_on)
 		return 0;
 
+	pr_debug("%s: Power-%s (idle state %d timed %s)\n", genpd->name, "on",
+		 state_idx, timed ? "true" : "false");
+
 	if (!timed)
 		return genpd->power_on(genpd);
 
@@ -276,6 +279,9 @@ static int _genpd_power_off(struct generic_pm_domain *genpd, bool timed)
 
 	if (!genpd->power_off)
 		return 0;
+
+	pr_debug("%s: Power-%s (idle state %d timed %s)\n", genpd->name, "off",
+		 state_idx, timed ? "true" : "false");
 
 	if (!timed)
 		return genpd->power_off(genpd);
@@ -367,6 +373,13 @@ static int genpd_power_off(struct generic_pm_domain *genpd, bool one_dev_on,
 	if (genpd->gov && genpd->gov->power_down_ok) {
 		if (!genpd->gov->power_down_ok(&genpd->domain))
 			return -EAGAIN;
+	} else {
+		/*
+		 * if no valid state idx specified by governor, we use
+		 * the default state_idx 0 to enter in case the domain
+		 * has multi low power states.
+		 */
+		genpd->state_idx = 0;
 	}
 
 	if (genpd->power_off) {
@@ -374,6 +387,10 @@ static int genpd_power_off(struct generic_pm_domain *genpd, bool one_dev_on,
 
 		if (atomic_read(&genpd->sd_count) > 0)
 			return -EBUSY;
+
+		if (!genpd->device_count)
+			/* Choose the deepest state if no devices using this domain */
+			genpd->state_idx = genpd->state_count - 1;
 
 		/*
 		 * If sd_count > 0 at this point, one of the subdomains hasn't
@@ -795,7 +812,20 @@ static void genpd_sync_power_off(struct generic_pm_domain *genpd, bool use_lock,
 {
 	struct gpd_link *link;
 
-	if (!genpd_status_on(genpd) || genpd_is_always_on(genpd))
+	/*
+	 * Give the power domain a chance to switch to the deepest state in
+	 * case it's already off but in an intermediate low power state.
+	 * Due to power domain is alway off, so no need to check device wakeup
+	 * here anymore
+	 */
+
+	genpd->state_idx_saved = genpd->state_idx;
+
+	if (genpd_is_always_on(genpd))
+		return;
+
+	if (!genpd_status_on(genpd) &&
+	    genpd->state_idx == (genpd->state_count - 1))
 		return;
 
 	if (genpd->suspended_count != genpd->device_count
@@ -805,6 +835,9 @@ static void genpd_sync_power_off(struct generic_pm_domain *genpd, bool use_lock,
 	/* Choose the deepest state when suspending */
 	genpd->state_idx = genpd->state_count - 1;
 	if (_genpd_power_off(genpd, false))
+		return;
+
+	if (genpd->status == GPD_STATE_POWER_OFF)
 		return;
 
 	genpd->status = GPD_STATE_POWER_OFF;
@@ -854,6 +887,8 @@ static void genpd_sync_power_on(struct generic_pm_domain *genpd, bool use_lock,
 
 	_genpd_power_on(genpd, false);
 
+	/* restore save power domain state after resume */
+	genpd->state_idx = genpd->state_idx_saved;
 	genpd->status = GPD_STATE_ACTIVE;
 }
 
@@ -1905,7 +1940,7 @@ EXPORT_SYMBOL_GPL(of_genpd_del_provider);
  * Returns a valid pointer to struct generic_pm_domain on success or ERR_PTR()
  * on failure.
  */
-static struct generic_pm_domain *genpd_get_from_provider(
+struct generic_pm_domain *genpd_get_from_provider(
 					struct of_phandle_args *genpdspec)
 {
 	struct generic_pm_domain *genpd = ERR_PTR(-ENOENT);
@@ -1928,6 +1963,7 @@ static struct generic_pm_domain *genpd_get_from_provider(
 
 	return genpd;
 }
+EXPORT_SYMBOL_GPL(genpd_get_from_provider);
 
 /**
  * of_genpd_add_device() - Add a device to an I/O PM domain
@@ -2162,6 +2198,9 @@ int genpd_dev_pm_attach(struct device *dev)
 	genpd_lock(pd);
 	ret = genpd_power_on(pd, 0);
 	genpd_unlock(pd);
+
+	if (ret)
+		genpd_remove_device(pd, dev);
 out:
 	return ret ? -EPROBE_DEFER : 0;
 }
@@ -2206,6 +2245,38 @@ static int genpd_parse_state(struct genpd_power_state *genpd_state,
 	return 0;
 }
 
+static int genpd_iterate_idle_states(struct device_node *dn,
+				     struct genpd_power_state *states)
+{
+	int ret;
+	struct of_phandle_iterator it;
+	struct device_node *np;
+	int i = 0;
+
+	ret = of_count_phandle_with_args(dn, "domain-idle-states", NULL);
+	if (ret <= 0)
+		return ret;
+
+	/* Loop over the phandles until all the requested entry is found */
+	of_for_each_phandle(&it, ret, dn, "domain-idle-states", NULL, 0) {
+		np = it.node;
+		if (!of_match_node(idle_state_match, np))
+			continue;
+		if (states) {
+			ret = genpd_parse_state(&states[i], np);
+			if (ret) {
+				pr_err("Parsing idle state node %pOF failed with err %d\n",
+				       np, ret);
+				of_node_put(np);
+				return ret;
+			}
+		}
+		i++;
+	}
+
+	return i;
+}
+
 /**
  * of_genpd_parse_idle_states: Return array of idle states for the genpd.
  *
@@ -2215,49 +2286,31 @@ static int genpd_parse_state(struct genpd_power_state *genpd_state,
  *
  * Returns the device states parsed from the OF node. The memory for the states
  * is allocated by this function and is the responsibility of the caller to
- * free the memory after use.
+ * free the memory after use. If no domain idle states is found it returns
+ * -EINVAL and in case of errors, a negative error code.
  */
 int of_genpd_parse_idle_states(struct device_node *dn,
 			struct genpd_power_state **states, int *n)
 {
 	struct genpd_power_state *st;
-	struct device_node *np;
-	int i = 0;
-	int err, ret;
-	int count;
-	struct of_phandle_iterator it;
-	const struct of_device_id *match_id;
+	int ret;
 
-	count = of_count_phandle_with_args(dn, "domain-idle-states", NULL);
-	if (count <= 0)
-		return -EINVAL;
+	ret = genpd_iterate_idle_states(dn, NULL);
+	if (ret <= 0)
+		return ret < 0 ? ret : -EINVAL;
 
-	st = kcalloc(count, sizeof(*st), GFP_KERNEL);
+	st = kcalloc(ret, sizeof(*st), GFP_KERNEL);
 	if (!st)
 		return -ENOMEM;
 
-	/* Loop over the phandles until all the requested entry is found */
-	of_for_each_phandle(&it, err, dn, "domain-idle-states", NULL, 0) {
-		np = it.node;
-		match_id = of_match_node(idle_state_match, np);
-		if (!match_id)
-			continue;
-		ret = genpd_parse_state(&st[i++], np);
-		if (ret) {
-			pr_err
-			("Parsing idle state node %pOF failed with err %d\n",
-							np, ret);
-			of_node_put(np);
-			kfree(st);
-			return ret;
-		}
+	ret = genpd_iterate_idle_states(dn, st);
+	if (ret <= 0) {
+		kfree(st);
+		return ret < 0 ? ret : -EINVAL;
 	}
 
-	*n = i;
-	if (!i)
-		kfree(st);
-	else
-		*states = st;
+	*states = st;
+	*n = ret;
 
 	return 0;
 }

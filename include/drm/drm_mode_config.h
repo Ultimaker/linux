@@ -703,6 +703,11 @@ struct drm_mode_config {
 	 */
 	struct drm_property *aspect_ratio_property;
 	/**
+	 * @content_type_property: Optional connector property to control the
+	 * HDMI infoframe content type setting.
+	 */
+	struct drm_property *content_type_property;
+	/**
 	 * @degamma_lut_property: Optional CRTC property to set the LUT used to
 	 * convert the framebuffer's colors to linear gamma.
 	 */
@@ -735,11 +740,25 @@ struct drm_mode_config {
 	 * the position of the output on the host's screen.
 	 */
 	struct drm_property *suggested_x_property;
+
+	/**
+	 * @non_desktop_property: Optional connector property with a hint
+	 * that device isn't a standard display, and the console/desktop
+	 * should not be displayed on it.
+	 */
+	struct drm_property *non_desktop_property;
+
 	/**
 	 * @suggested_y_property: Optional connector property with a hint for
 	 * the position of the output on the host's screen.
 	 */
 	struct drm_property *suggested_y_property;
+
+	/**
+	 * hdr_metadata_property: Connector property containing hdr metatda
+	 * This will be provided by userspace compositors based on HDR content
+	 */
+	struct drm_property *hdr_source_metadata_property;
 
 	/* dumb ioctl parameters */
 	uint32_t preferred_depth, prefer_shadow;
@@ -765,6 +784,15 @@ struct drm_mode_config {
 
 	/* cursor size */
 	uint32_t cursor_width, cursor_height;
+
+	/**
+	 * @suspend_state:
+	 *
+	 * Atomic state when suspended.
+	 * Set by drm_mode_config_helper_suspend() and cleared by
+	 * drm_mode_config_helper_resume().
+	 */
+	struct drm_atomic_state *suspend_state;
 
 	const struct drm_mode_config_helper_funcs *helper_private;
 };

@@ -21,6 +21,8 @@
 #include <linux/interrupt.h>
 #include <linux/regmap.h>
 #include <linux/usb/typec.h>
+#include <linux/of_gpio.h>
+#include <linux/extcon.h>
 
 #include "pd.h"
 #include "tcpci.h"
@@ -31,14 +33,25 @@
 struct tcpci {
 	struct device *dev;
 	struct i2c_client *client;
+	struct extcon_dev *edev;
 
 	struct tcpm_port *port;
 
 	struct regmap *regmap;
 
 	bool controls_vbus;
+	bool drive_vbus;
+	bool sink_disable;
+	struct gpio_desc *ss_sel_gpio;
 
 	struct tcpc_dev tcpc;
+	unsigned int irq_mask;
+};
+
+static const unsigned int tcpci_extcon_cable[] = {
+	EXTCON_USB_HOST,
+	EXTCON_USB,
+	EXTCON_NONE,
 };
 
 static inline struct tcpci *tcpc_to_tcpci(struct tcpc_dev *tcpc)
@@ -55,6 +68,31 @@ static int tcpci_read16(struct tcpci *tcpci, unsigned int reg,
 static int tcpci_write16(struct tcpci *tcpci, unsigned int reg, u16 val)
 {
 	return regmap_raw_write(tcpci->regmap, reg, &val, sizeof(u16));
+}
+
+static int tcpci_vbus_force_discharge(struct tcpc_dev *tcpc, bool enable)
+{
+	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
+	unsigned int reg;
+	int ret;
+
+	if (enable)
+		regmap_write(tcpci->regmap,
+			TCPC_VBUS_VOLTAGE_ALARM_LO_CFG, 0x1c);
+	else
+		regmap_write(tcpci->regmap,
+			TCPC_VBUS_VOLTAGE_ALARM_LO_CFG, 0);
+
+	regmap_read(tcpci->regmap, TCPC_POWER_CTRL, &reg);
+	if (enable)
+		reg |= TCPC_POWER_CTRL_FORCEDISCH;
+	else
+		reg &= ~TCPC_POWER_CTRL_FORCEDISCH;
+	ret = regmap_write(tcpci->regmap, TCPC_POWER_CTRL, reg);
+	if (ret < 0)
+		return ret;
+
+	return 0;
 }
 
 static int tcpci_set_cc(struct tcpc_dev *tcpc, enum typec_cc_status cc)
@@ -105,28 +143,79 @@ static int tcpci_set_cc(struct tcpc_dev *tcpc, enum typec_cc_status cc)
 }
 
 static int tcpci_start_drp_toggling(struct tcpc_dev *tcpc,
-				    enum typec_cc_status cc)
+			enum typec_cc_status cc, int attach)
 {
 	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
-	unsigned int reg = TCPC_ROLE_CTRL_DRP;
+	unsigned int reg = 0;
 
-	switch (cc) {
-	default:
-	case TYPEC_CC_RP_DEF:
-		reg |= (TCPC_ROLE_CTRL_RP_VAL_DEF <<
-			TCPC_ROLE_CTRL_RP_VAL_SHIFT);
-		break;
-	case TYPEC_CC_RP_1_5:
-		reg |= (TCPC_ROLE_CTRL_RP_VAL_1_5 <<
-			TCPC_ROLE_CTRL_RP_VAL_SHIFT);
-		break;
-	case TYPEC_CC_RP_3_0:
-		reg |= (TCPC_ROLE_CTRL_RP_VAL_3_0 <<
-			TCPC_ROLE_CTRL_RP_VAL_SHIFT);
-		break;
+	/* Only set DRP bit for auto toggle when unattached */
+	if (attach) {
+		switch (cc) {
+		case TYPEC_CC_RP_DEF:
+			if (attach >> TYPEC_POLARITY_CC2)
+				reg |= TCPC_ROLE_CTRL_CC_RP <<
+					TCPC_ROLE_CTRL_CC2_SHIFT;
+			else if (attach >> TYPEC_POLARITY_CC1)
+				reg |= TCPC_ROLE_CTRL_CC_RP <<
+					TCPC_ROLE_CTRL_CC1_SHIFT;
+
+			reg |= (TCPC_ROLE_CTRL_RP_VAL_DEF <<
+				TCPC_ROLE_CTRL_RP_VAL_SHIFT);
+			break;
+		case TYPEC_CC_RP_1_5:
+			if (attach >> TYPEC_POLARITY_CC2)
+				reg |= TCPC_ROLE_CTRL_CC_RP <<
+					TCPC_ROLE_CTRL_CC2_SHIFT;
+			else if (attach >> TYPEC_POLARITY_CC1)
+				reg |= TCPC_ROLE_CTRL_CC_RP <<
+					TCPC_ROLE_CTRL_CC1_SHIFT;
+
+			reg |= (TCPC_ROLE_CTRL_RP_VAL_1_5 <<
+				TCPC_ROLE_CTRL_RP_VAL_SHIFT);
+			break;
+		case TYPEC_CC_RP_3_0:
+			if (attach >> TYPEC_POLARITY_CC2)
+				reg |= TCPC_ROLE_CTRL_CC_RP <<
+					TCPC_ROLE_CTRL_CC2_SHIFT;
+			else if (attach >> TYPEC_POLARITY_CC1)
+				reg |= TCPC_ROLE_CTRL_CC_RP <<
+					TCPC_ROLE_CTRL_CC1_SHIFT;
+
+			reg |= (TCPC_ROLE_CTRL_RP_VAL_3_0 <<
+				TCPC_ROLE_CTRL_RP_VAL_SHIFT);
+			break;
+		case TYPEC_CC_RD:
+			if (attach >> TYPEC_POLARITY_CC2)
+				reg |= TCPC_ROLE_CTRL_CC_RD <<
+					TCPC_ROLE_CTRL_CC2_SHIFT;
+			else if (attach >> TYPEC_POLARITY_CC1)
+				reg |= TCPC_ROLE_CTRL_CC_RD <<
+					TCPC_ROLE_CTRL_CC1_SHIFT;
+			break;
+		default:
+			break;
+		}
+
+		/* keep the un-touched cc line to be open */
+		if (attach >> TYPEC_POLARITY_CC2)
+			reg |= TCPC_ROLE_CTRL_CC_OPEN <<
+				TCPC_ROLE_CTRL_CC1_SHIFT;
+		else if (attach >> TYPEC_POLARITY_CC1)
+			reg |= TCPC_ROLE_CTRL_CC_OPEN <<
+				TCPC_ROLE_CTRL_CC2_SHIFT;
+	} else { /* Not attached */
+		if (cc == TYPEC_CC_RD)
+			reg = TCPC_ROLE_CTRL_DRP | 0xa; /* Rd */
+		else
+			reg = TCPC_ROLE_CTRL_DRP | 0x5; /* Rp */
 	}
 
-	return regmap_write(tcpci->regmap, TCPC_ROLE_CTRL, reg);
+	regmap_write(tcpci->regmap, TCPC_ROLE_CTRL, reg);
+
+	if (!attach)
+		regmap_write(tcpci->regmap, TCPC_COMMAND,
+				TCPC_CMD_LOOK4CONNECTION);
+	return 0;
 }
 
 static enum typec_cc_status tcpci_to_typec_cc(unsigned int cc, bool sink)
@@ -181,17 +270,31 @@ static int tcpci_set_polarity(struct tcpc_dev *tcpc,
 	return 0;
 }
 
+static int tcpci_set_ss_mux(struct tcpc_dev *tcpc,
+				enum typec_cc_polarity polarity)
+{
+	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
+
+	if (!tcpci->ss_sel_gpio)
+		return 0;
+
+	if (polarity == TYPEC_POLARITY_CC1)
+		gpiod_set_value_cansleep(tcpci->ss_sel_gpio, 1);
+	else
+		gpiod_set_value_cansleep(tcpci->ss_sel_gpio, 0);
+
+	return 0;
+}
+
 static int tcpci_set_vconn(struct tcpc_dev *tcpc, bool enable)
 {
 	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
 	int ret;
 
-	ret = regmap_write(tcpci->regmap, TCPC_POWER_CTRL,
-			   enable ? TCPC_POWER_CTRL_VCONN_ENABLE : 0);
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	ret = regmap_update_bits(tcpci->regmap, TCPC_POWER_CTRL,
+				TCPC_POWER_CTRL_VCONN_ENABLE,
+				enable ? TCPC_POWER_CTRL_VCONN_ENABLE : 0);
+	return ret;
 }
 
 static int tcpci_set_roles(struct tcpc_dev *tcpc, bool attached,
@@ -209,6 +312,11 @@ static int tcpci_set_roles(struct tcpc_dev *tcpc, bool attached,
 	ret = regmap_write(tcpci->regmap, TCPC_MSG_HDR_INFO, reg);
 	if (ret < 0)
 		return ret;
+
+	if (data == TYPEC_HOST)
+		extcon_set_state_sync(tcpci->edev, EXTCON_USB_HOST, true);
+	else
+		extcon_set_state_sync(tcpci->edev, EXTCON_USB_HOST, false);
 
 	return 0;
 }
@@ -238,7 +346,34 @@ static int tcpci_get_vbus(struct tcpc_dev *tcpc)
 	if (ret < 0)
 		return ret;
 
-	return !!(reg & TCPC_POWER_STATUS_VBUS_PRES);
+	ret = !!(reg & TCPC_POWER_STATUS_VBUS_PRES);
+
+	/*
+	 * If the vbus is not from itself for source, we
+	 * assume the vbus is from the port partner, this
+	 * is to work around the case of connect to legacy
+	 * Host like PC via a fixed Rp pull up cable, so
+	 * we notify the possible EXTCON_USB connection.
+	 */
+	if (!tcpci->drive_vbus)
+		extcon_set_state_sync(tcpci->edev, EXTCON_USB, ret);
+
+	return ret;
+}
+
+static unsigned int tcpci_get_vbus_vol(struct tcpc_dev *tcpc)
+{
+	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
+	unsigned int reg, ret = 0;
+
+	ret = regmap_read(tcpci->regmap, TCPC_VBUS_VOLTAGE, &reg);
+
+	/* Convert it to be the vol number(mv) */
+	ret = ((reg & TCPC_VBUS_VOL_MASK) <<
+		((reg & TCPC_VBUS_VOL_SCALE_FACTOR_MASK) >>
+		TCPC_VBUS_VOL_SCALE_FACTOR_SHIFT)) * TCPC_VBUS_VOL_MV_UNIT;
+
+	return ret;
 }
 
 static int tcpci_set_vbus(struct tcpc_dev *tcpc, bool source, bool sink)
@@ -246,13 +381,14 @@ static int tcpci_set_vbus(struct tcpc_dev *tcpc, bool source, bool sink)
 	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
 	int ret;
 
-	/* Disable both source and sink first before enabling anything */
-
-	if (!source) {
+	/* Only disable source if it was enabled */
+	if (!source && tcpci->drive_vbus) {
 		ret = regmap_write(tcpci->regmap, TCPC_COMMAND,
 				   TCPC_CMD_DISABLE_SRC_VBUS);
 		if (ret < 0)
 			return ret;
+
+		tcpci->drive_vbus = false;
 	}
 
 	if (!sink) {
@@ -262,14 +398,19 @@ static int tcpci_set_vbus(struct tcpc_dev *tcpc, bool source, bool sink)
 			return ret;
 	}
 
+	/* Enable force discharge */
+	if (!source && !sink)
+		tcpci_vbus_force_discharge(tcpc, true);
+
 	if (source) {
 		ret = regmap_write(tcpci->regmap, TCPC_COMMAND,
 				   TCPC_CMD_SRC_VBUS_DEFAULT);
 		if (ret < 0)
 			return ret;
+		tcpci->drive_vbus = true;
 	}
 
-	if (sink) {
+	if (sink && !tcpci->sink_disable) {
 		ret = regmap_write(tcpci->regmap, TCPC_COMMAND,
 				   TCPC_CMD_SINK_VBUS);
 		if (ret < 0)
@@ -313,6 +454,35 @@ static int tcpci_pd_transmit(struct tcpc_dev *tcpc,
 	return 0;
 }
 
+static int tcpci_vbus_detect(struct tcpc_dev *tcpc, bool enable)
+{
+	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
+	int ret;
+
+	if (enable) {
+		ret = regmap_write(tcpci->regmap, TCPC_COMMAND,
+				   TCPC_CMD_ENABLE_VBUS_DETECT);
+		if (ret < 0)
+			return ret;
+	} else {
+		ret = regmap_write(tcpci->regmap, TCPC_COMMAND,
+				   TCPC_CMD_DISABLE_VBUS_DETECT);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
+static void tcpci_bist_mode(struct tcpc_dev *tcpc, bool enable)
+{
+	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
+
+	regmap_update_bits(tcpci->regmap, TCPC_TCPC_CTRL,
+			   TCPC_TCPC_CTRL_BIST_MODE,
+			   enable ? TCPC_TCPC_CTRL_BIST_MODE : 0);
+}
+
 static int tcpci_init(struct tcpc_dev *tcpc)
 {
 	struct tcpci *tcpci = tcpc_to_tcpci(tcpc);
@@ -336,6 +506,9 @@ static int tcpci_init(struct tcpc_dev *tcpc)
 	if (ret < 0)
 		return ret;
 
+	/* Clear fault condition */
+	regmap_write(tcpci->regmap, TCPC_FAULT_STATUS, 0x80);
+
 	if (tcpci->controls_vbus)
 		reg = TCPC_POWER_STATUS_VBUS_PRES;
 	else
@@ -344,11 +517,20 @@ static int tcpci_init(struct tcpc_dev *tcpc)
 	if (ret < 0)
 		return ret;
 
+	/* Enable Voltage Alarms Power status reporting */
+	regmap_read(tcpci->regmap, TCPC_POWER_CTRL, &reg);
+	reg &= ~TCPC_POWER_CTRL_DIS_VOL_ALARM;
+	ret = regmap_write(tcpci->regmap, TCPC_POWER_CTRL, reg);
+
 	reg = TCPC_ALERT_TX_SUCCESS | TCPC_ALERT_TX_FAILED |
 		TCPC_ALERT_TX_DISCARDED | TCPC_ALERT_RX_STATUS |
-		TCPC_ALERT_RX_HARD_RST | TCPC_ALERT_CC_STATUS;
+		TCPC_ALERT_RX_HARD_RST | TCPC_ALERT_CC_STATUS |
+		TCPC_ALERT_RX_BUF_OVF | TCPC_ALERT_FAULT |
+		TCPC_ALERT_V_ALARM_LO;
 	if (tcpci->controls_vbus)
 		reg |= TCPC_ALERT_POWER_STATUS;
+	tcpci->irq_mask = reg;
+
 	return tcpci_write16(tcpci, TCPC_ALERT_MASK, reg);
 }
 
@@ -360,10 +542,10 @@ static irqreturn_t tcpci_irq(int irq, void *dev_id)
 	tcpci_read16(tcpci, TCPC_ALERT, &status);
 
 	/*
-	 * Clear alert status for everything except RX_STATUS, which shouldn't
+	 * Clear alert status for enabled irq except RX_STATUS, which shouldn't
 	 * be cleared until we have successfully retrieved message.
 	 */
-	if (status & ~TCPC_ALERT_RX_STATUS)
+	if ((status & ~TCPC_ALERT_RX_STATUS) & tcpci->irq_mask)
 		tcpci_write16(tcpci, TCPC_ALERT,
 			      status & ~TCPC_ALERT_RX_STATUS);
 
@@ -371,6 +553,9 @@ static irqreturn_t tcpci_irq(int irq, void *dev_id)
 		tcpm_cc_change(tcpci->port);
 
 	if (status & TCPC_ALERT_POWER_STATUS) {
+		/* Read power status to clear the event */
+		regmap_read(tcpci->regmap, TCPC_POWER_STATUS, &reg);
+
 		regmap_read(tcpci->regmap, TCPC_POWER_STATUS_MASK, &reg);
 
 		/*
@@ -383,6 +568,9 @@ static irqreturn_t tcpci_irq(int irq, void *dev_id)
 			tcpm_vbus_change(tcpci->port);
 	}
 
+	if (status & TCPC_ALERT_V_ALARM_LO)
+		tcpm_vbus_low_alarm(tcpci->port);
+
 	if (status & TCPC_ALERT_RX_STATUS) {
 		struct pd_message msg;
 		unsigned int cnt;
@@ -392,6 +580,12 @@ static irqreturn_t tcpci_irq(int irq, void *dev_id)
 		tcpci_read16(tcpci, TCPC_RX_HDR, &reg);
 		msg.header = reg;
 
+		/*
+		 * TCPC_RX_BYTE_CNT is the number of bytes in the
+		 * RX_BUFFER_DATA_OBJECTS plus three (for the RX_BUF_FRAME_TYPE
+		 * and RX_BUF_HEADER).
+		 */
+		cnt -= 3;
 		if (WARN_ON(cnt > sizeof(msg.payload)))
 			cnt = sizeof(msg.payload);
 
@@ -403,6 +597,17 @@ static irqreturn_t tcpci_irq(int irq, void *dev_id)
 		tcpci_write16(tcpci, TCPC_ALERT, TCPC_ALERT_RX_STATUS);
 
 		tcpm_pd_receive(tcpci->port, &msg);
+	}
+
+	if (status & TCPC_ALERT_RX_BUF_OVF)
+		tcpci_write16(tcpci, TCPC_ALERT,
+			TCPC_ALERT_RX_BUF_OVF | TCPC_ALERT_RX_STATUS);
+
+	/* Clear the fault status anyway */
+	if (status & TCPC_ALERT_FAULT) {
+		regmap_read(tcpci->regmap, TCPC_FAULT_STATUS, &reg);
+		regmap_write(tcpci->regmap, TCPC_FAULT_STATUS,
+				reg | TCPC_FAULT_STATUS_CLEAR);
 	}
 
 	if (status & TCPC_ALERT_RX_HARD_RST)
@@ -430,12 +635,166 @@ static const struct tcpc_config tcpci_tcpc_config = {
 	.default_role = TYPEC_SINK,
 };
 
+/* Populate struct tcpc_config from ACPI/device-tree */
 static int tcpci_parse_config(struct tcpci *tcpci)
 {
+	struct tcpc_config *tcfg;
+	int ret = -EINVAL;
+
 	tcpci->controls_vbus = true; /* XXX */
 
-	/* TODO: Populate struct tcpc_config from ACPI/device-tree */
-	tcpci->tcpc.config = &tcpci_tcpc_config;
+	/* Alloc tcpc_config struct */
+	tcpci->tcpc.config = devm_kzalloc(tcpci->dev, sizeof(*tcfg),
+							GFP_KERNEL);
+	if (!tcpci->tcpc.config)
+		return -ENOMEM;
+
+	tcfg = tcpci->tcpc.config;
+
+	/* Get the port-type */
+	tcfg->type = typec_get_port_type(tcpci->dev);
+	if (tcfg->type == TYPEC_PORT_TYPE_UNKNOWN) {
+		dev_err(tcpci->dev, "typec port type is NOT correct!\n");
+		return -EINVAL;
+	}
+
+	if (tcfg->type == TYPEC_PORT_UFP)
+		goto sink;
+
+	/* Check source pdo array size */
+	ret = device_property_read_u32_array(tcpci->dev, "src-pdos", NULL, 0);
+	if (ret <= 0) {
+		dev_err(tcpci->dev, "typec source pdo is missing!\n");
+		return -EINVAL;
+	}
+
+	tcfg->nr_src_pdo = ret;
+
+	/* Alloc src_pdo based on the array size */
+	tcfg->src_pdo = devm_kzalloc(tcpci->dev,
+		sizeof(*tcfg->src_pdo) * tcfg->nr_src_pdo, GFP_KERNEL);
+	if (!tcfg->src_pdo)
+		return -ENOMEM;
+
+	/* Read out source pdo array */
+	ret = device_property_read_u32_array(tcpci->dev, "src-pdos",
+				tcfg->src_pdo, tcfg->nr_src_pdo);
+	if (ret) {
+		dev_err(tcpci->dev, "Failed to read src pdo!\n");
+		return -EINVAL;
+	}
+
+	if (tcfg->type == TYPEC_PORT_DFP)
+		return 0;
+
+	/* Get the default-role */
+	tcfg->default_role = typec_get_power_role(tcpci->dev);
+	if (tcfg->default_role == TYPEC_ROLE_UNKNOWN) {
+		dev_err(tcpci->dev, "typec power role is NOT correct!\n");
+		return -EINVAL;
+	}
+
+	/*
+	 * In case DRP only for data role, power role is source only
+	 * we can use this property to disable power sink.
+	 */
+	if (device_property_read_bool(tcpci->dev, "sink-disable")) {
+		tcpci->sink_disable = true;
+
+		/* Provide a sink PDO to setup a PD session */
+		tcfg->nr_snk_pdo = 1;
+		tcfg->snk_pdo = devm_kzalloc(tcpci->dev,
+				sizeof(*tcfg->snk_pdo), GFP_KERNEL);
+		if (!tcfg->snk_pdo)
+			return -ENOMEM;
+
+		/*
+		 * Sink PDO setting:
+		 * - Voltage in 50mV units: 5V
+		 * - Operational Current in 10mA units: 100mA
+		 */
+		*tcfg->snk_pdo = PDO_FIXED(5000,
+					100,
+					PDO_FIXED_DUAL_ROLE |
+					PDO_FIXED_EXTPOWER |
+					PDO_FIXED_USB_COMM |
+					PDO_FIXED_DATA_SWAP);
+		tcfg->max_snk_mv = 5000;
+		tcfg->max_snk_ma = 2000;
+		tcfg->max_snk_mw = 10000;
+		tcfg->operating_snk_mw = 500;
+
+		return 0;
+	}
+
+sink:
+	/* Check the num of snk pdo */
+	ret = device_property_read_u32_array(tcpci->dev,
+					     "snk-pdos", NULL, 0);
+	if (ret <= 0) {
+		dev_err(tcpci->dev, "typec sink pdo is missing!\n");
+		return -EINVAL;
+	}
+
+	tcfg->nr_snk_pdo = ret;
+
+	/* alloc snk_pdo based on the array size */
+	tcfg->snk_pdo = devm_kzalloc(tcpci->dev,
+		sizeof(*tcfg->snk_pdo) * tcfg->nr_snk_pdo, GFP_KERNEL);
+	if (!tcfg->snk_pdo)
+		return -ENOMEM;
+
+	/* Read out sink pdo array */
+	ret = device_property_read_u32_array(tcpci->dev, "snk-pdos",
+				tcfg->snk_pdo, tcfg->nr_snk_pdo);
+	if (ret) {
+		dev_err(tcpci->dev, "Failed to read snk pdo!\n");
+		return -EINVAL;
+	}
+
+	/* Get the max-snk-mv max-snk-ma op-snk-mw */
+	if (device_property_read_u32(tcpci->dev, "max-snk-mv",
+						&tcfg->max_snk_mv) ||
+		device_property_read_u32(tcpci->dev, "max-snk-ma",
+						&tcfg->max_snk_ma) ||
+		device_property_read_u32(tcpci->dev, "max-snk-mw",
+						&tcfg->max_snk_mw) ||
+		device_property_read_u32(tcpci->dev, "op-snk-mw",
+						&tcfg->operating_snk_mw)) {
+		ret = -EINVAL;
+		goto snk_setting_wrong;
+	}
+
+	return 0;
+
+snk_setting_wrong:
+	if (tcfg->type == TYPEC_PORT_DRP ||
+			tcfg->type == TYPEC_PORT_UFP)
+		dev_err(tcpci->dev, "Failed to read snk setting!\n");
+
+	return ret;
+}
+
+static int tcpci_ss_mux_control_init(struct tcpci *tcpci)
+{
+	struct device *dev = tcpci->dev;
+	struct gpio_desc *gpiod_reset;
+
+	gpiod_reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(gpiod_reset)) {
+		dev_err(dev, "Failed to request reset gpio.");
+		return PTR_ERR(gpiod_reset);
+	}
+
+	if (gpiod_reset)
+		usleep_range(700, 1000);
+
+	tcpci->ss_sel_gpio = devm_gpiod_get_optional(dev, "ss-sel",
+							GPIOD_OUT_HIGH);
+	if (IS_ERR(tcpci->ss_sel_gpio)) {
+		dev_err(dev, "Failed to request super speed mux sel gpio.");
+		return PTR_ERR(tcpci->ss_sel_gpio);
+	}
 
 	return 0;
 }
@@ -465,27 +824,56 @@ static int tcpci_probe(struct i2c_client *client,
 	tcpci->tcpc.set_polarity = tcpci_set_polarity;
 	tcpci->tcpc.set_vconn = tcpci_set_vconn;
 	tcpci->tcpc.start_drp_toggling = tcpci_start_drp_toggling;
+	tcpci->tcpc.vbus_detect = tcpci_vbus_detect;
+	tcpci->tcpc.vbus_discharge = tcpci_vbus_force_discharge;
+	tcpci->tcpc.get_vbus_vol = tcpci_get_vbus_vol;
+	tcpci->tcpc.bist_mode = tcpci_bist_mode;
+	tcpci->tcpc.ss_mux_sel = tcpci_set_ss_mux;
 
 	tcpci->tcpc.set_pd_rx = tcpci_set_pd_rx;
 	tcpci->tcpc.set_roles = tcpci_set_roles;
 	tcpci->tcpc.pd_transmit = tcpci_pd_transmit;
 
+	/* Allocate extcon device */
+	tcpci->edev = devm_extcon_dev_allocate(&client->dev,
+					tcpci_extcon_cable);
+	if (IS_ERR(tcpci->edev)) {
+		dev_err(&client->dev, "failed to allocate extcon dev.\n");
+		return -ENOMEM;
+	}
+
+	err = devm_extcon_dev_register(&client->dev, tcpci->edev);
+	if (err) {
+		dev_err(&client->dev, "failed to register extcon dev.\n");
+		return err;
+	}
+
 	err = tcpci_parse_config(tcpci);
 	if (err < 0)
 		return err;
 
-	/* Disable chip interrupts */
-	tcpci_write16(tcpci, TCPC_ALERT_MASK, 0);
+	tcpci->port = tcpm_register_port(tcpci->dev, &tcpci->tcpc);
+	if (IS_ERR(tcpci->port))
+		return PTR_ERR(tcpci->port);
 
+	err = tcpci_ss_mux_control_init(tcpci);
+	if (err)
+		goto err1;
+
+	irq_set_status_flags(client->irq, IRQ_DISABLE_UNLAZY);
 	err = devm_request_threaded_irq(tcpci->dev, client->irq, NULL,
 					tcpci_irq,
 					IRQF_ONESHOT | IRQF_TRIGGER_LOW,
 					dev_name(tcpci->dev), tcpci);
 	if (err < 0)
-		return err;
+		goto err1;
 
-	tcpci->port = tcpm_register_port(tcpci->dev, &tcpci->tcpc);
-	return PTR_ERR_OR_ZERO(tcpci->port);
+	device_set_wakeup_capable(tcpci->dev, true);
+
+	return 0;
+err1:
+	tcpm_unregister_port(tcpci->port);
+	return err;
 }
 
 static int tcpci_remove(struct i2c_client *client)
@@ -493,9 +881,38 @@ static int tcpci_remove(struct i2c_client *client)
 	struct tcpci *tcpci = i2c_get_clientdata(client);
 
 	tcpm_unregister_port(tcpci->port);
+	irq_clear_status_flags(client->irq, IRQ_DISABLE_UNLAZY);
 
 	return 0;
 }
+
+static int tcpci_suspend(struct device *dev)
+{
+	struct tcpci *tcpci = dev_get_drvdata(dev);
+
+	if (device_may_wakeup(dev))
+		enable_irq_wake(tcpci->client->irq);
+	else
+		disable_irq(tcpci->client->irq);
+
+	return 0;
+}
+
+static int tcpci_resume(struct device *dev)
+{
+	struct tcpci *tcpci = dev_get_drvdata(dev);
+
+	if (device_may_wakeup(dev))
+		disable_irq_wake(tcpci->client->irq);
+	else
+		enable_irq(tcpci->client->irq);
+
+	return 0;
+}
+
+static const struct dev_pm_ops tcpci_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(tcpci_suspend, tcpci_resume)
+};
 
 static const struct i2c_device_id tcpci_id[] = {
 	{ "tcpci", 0 },
@@ -514,6 +931,7 @@ MODULE_DEVICE_TABLE(of, tcpci_of_match);
 static struct i2c_driver tcpci_i2c_driver = {
 	.driver = {
 		.name = "tcpci",
+		.pm = &tcpci_pm_ops,
 		.of_match_table = of_match_ptr(tcpci_of_match),
 	},
 	.probe = tcpci_probe,

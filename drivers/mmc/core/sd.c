@@ -480,6 +480,13 @@ static int sd_set_bus_speed_mode(struct mmc_card *card, u8 *status)
 	else {
 		mmc_set_timing(card->host, timing);
 		mmc_set_clock(card->host, card->sw_caps.uhs_max_dtr);
+
+		/*
+		 * FIXME: Sandisk SD3.0 cards DDR50 mode requires such
+		 * delay to get stable, without this delay we may encounter
+		 * CRC errors after switch to DDR50 mode
+		 */
+		mmc_delay(100);
 	}
 
 	return 0;
@@ -1056,14 +1063,14 @@ static void mmc_sd_detect(struct mmc_host *host)
 {
 	int err;
 
-	mmc_get_card(host->card);
+	mmc_get_card(host->card, NULL);
 
 	/*
 	 * Just check if our card has been removed.
 	 */
 	err = _mmc_detect_card_removed(host);
 
-	mmc_put_card(host->card);
+	mmc_put_card(host->card, NULL);
 
 	if (err) {
 		mmc_sd_remove(host);

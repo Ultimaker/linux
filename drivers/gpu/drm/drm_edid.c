@@ -82,6 +82,8 @@
 #define EDID_QUIRK_FORCE_6BPC			(1 << 10)
 /* Force 10bpc */
 #define EDID_QUIRK_FORCE_10BPC			(1 << 11)
+/* Non desktop display (i.e. HMD) */
+#define EDID_QUIRK_NON_DESKTOP			(1 << 12)
 
 struct detailed_mode_closure {
 	struct drm_connector *connector;
@@ -111,8 +113,17 @@ static const struct edid_quirk {
 	/* AEO model 0 reports 8 bpc, but is a 6 bpc panel */
 	{ "AEO", 0, EDID_QUIRK_FORCE_6BPC },
 
+	/* BOE model on HP Pavilion 15-n233sl reports 8 bpc, but is a 6 bpc panel */
+	{ "BOE", 0x78b, EDID_QUIRK_FORCE_6BPC },
+
 	/* CPT panel of Asus UX303LA reports 8 bpc, but is a 6 bpc panel */
 	{ "CPT", 0x17df, EDID_QUIRK_FORCE_6BPC },
+
+	/* SDC panel of Lenovo B50-80 reports 8 bpc, but is a 6 bpc panel */
+	{ "SDC", 0x3652, EDID_QUIRK_FORCE_6BPC },
+
+	/* BOE model 0x0771 reports 8 bpc, but is a 6 bpc panel */
+	{ "BOE", 0x0771, EDID_QUIRK_FORCE_6BPC },
 
 	/* Belinea 10 15 55 */
 	{ "MAX", 1516, EDID_QUIRK_PREFER_LARGE_60 },
@@ -160,6 +171,10 @@ static const struct edid_quirk {
 
 	/* Rotel RSX-1058 forwards sink's EDID but only does HDMI 1.1*/
 	{ "ETR", 13896, EDID_QUIRK_FORCE_8BPC },
+
+	/* Quantum data 980 */
+	{ "QDI", 980, EDID_QUIRK_PREFER_LARGE_60 },
+	{ "QDI", 178, EDID_QUIRK_PREFER_LARGE_60 },
 };
 
 /*
@@ -2796,6 +2811,23 @@ add_detailed_modes(struct drm_connector *connector, struct edid *edid,
 #define EDID_CEA_YCRCB422	(1 << 4)
 #define EDID_CEA_VCDB_QS	(1 << 6)
 
+#define DATA_BLOCK_EXTENDED_TAG		0x07
+#define VIDEO_CAPABILITY_DATA_BLOCK	0x0
+#define VSVD_DATA_BLOCK			0x1
+#define COLORIMETRY_DATA_BLOCK		0x5
+#define HDR_STATIC_METADATA_BLOCK	0x6
+
+/* HDR Metadata Block: Bit fields */
+#define SUPPORTED_EOTF_MASK            0x3f
+#define TRADITIONAL_GAMMA_SDR          (0x1 << 0)
+#define TRADITIONAL_GAMMA_HDR          (0x1 << 1)
+#define SMPTE_ST2084                   (0x1 << 2)
+#define BT_2100_HLG                    (0x1 << 3)
+#define FUTURE_EOTF                    (0x1 << 4)
+#define RESERVED_EOTF                  (0x3 << 5)
+
+#define STATIC_METADATA_TYPE1          (0x1 << 0)
+
 /*
  * Search EDID for CEA extension block.
  */
@@ -3742,6 +3774,83 @@ static void fixup_detailed_cea_mode_clock(struct drm_display_mode *mode)
 	mode->clock = clock;
 }
 
+static bool cea_db_is_hdmi_colorimetry_data_block(const u8 *db)
+{
+	if (cea_db_tag(db) != DATA_BLOCK_EXTENDED_TAG)
+		return false;
+
+	if (db[1] != COLORIMETRY_DATA_BLOCK)
+		return false;
+
+	return true;
+}
+
+static void
+drm_parse_colorimetry_data_block(struct drm_connector *connector, const u8 *db)
+{
+	struct drm_hdmi_info *info = &connector->display_info.hdmi;
+	uint16_t len;
+
+	len = cea_db_payload_len(db);
+	info->colorimetry = db[2];
+}
+
+
+static bool cea_db_is_hdmi_hdr_metadata_block(const u8 *db)
+{
+	if (cea_db_tag(db) != DATA_BLOCK_EXTENDED_TAG)
+		return false;
+
+	if (db[1] != HDR_STATIC_METADATA_BLOCK)
+		return false;
+
+	return true;
+}
+
+static uint16_t eotf_supported(const u8 *edid_ext)
+{
+	uint16_t val = 0;
+
+	if (edid_ext[2] & TRADITIONAL_GAMMA_SDR)
+		val |= TRADITIONAL_GAMMA_SDR;
+	if (edid_ext[2] & TRADITIONAL_GAMMA_HDR)
+		val |= TRADITIONAL_GAMMA_HDR;
+	if (edid_ext[2] & SMPTE_ST2084)
+		val |= SMPTE_ST2084;
+	if (edid_ext[2] & BT_2100_HLG)
+		val |= BT_2100_HLG;
+
+	return val;
+}
+
+static uint16_t hdr_metadata_type(const u8 *edid_ext)
+{
+	uint16_t val = 0;
+
+	if (edid_ext[3] & STATIC_METADATA_TYPE1)
+		val |= STATIC_METADATA_TYPE1;
+
+	return val;
+}
+
+static void
+drm_parse_hdr_metadata_block(struct drm_connector *connector, const u8 *db)
+{
+	struct drm_hdmi_info *info = &connector->display_info.hdmi;
+	uint16_t len;
+
+	len = cea_db_payload_len(db);
+	info->hdr_panel_metadata.eotf = eotf_supported(db);
+	info->hdr_panel_metadata.type = hdr_metadata_type(db);
+
+	if (len == 5) {
+		info->hdr_panel_metadata.max_cll = db[4];
+		info->hdr_panel_metadata.max_fall = db[5];
+	} else if (len == 4) {
+		info->hdr_panel_metadata.max_cll = db[4];
+	}
+}
+
 static void
 drm_parse_hdmi_vsdb_audio(struct drm_connector *connector, const u8 *db)
 {
@@ -4220,7 +4329,7 @@ static void drm_parse_ycbcr420_deep_color_info(struct drm_connector *connector,
 	struct drm_hdmi_info *hdmi = &connector->display_info.hdmi;
 
 	dc_mask = db[7] & DRM_EDID_YCBCR420_DC_MASK;
-	hdmi->y420_dc_modes |= dc_mask;
+	hdmi->y420_dc_modes = dc_mask;
 }
 
 static void drm_parse_hdmi_forum_vsdb(struct drm_connector *connector,
@@ -4385,14 +4494,19 @@ static void drm_parse_cea_ext(struct drm_connector *connector,
 			drm_parse_hdmi_forum_vsdb(connector, db);
 		if (cea_db_is_y420cmdb(db))
 			drm_parse_y420cmdb_bitmap(connector, db);
+		if (cea_db_is_hdmi_hdr_metadata_block(db))
+			drm_parse_hdr_metadata_block(connector, db);
+		if (cea_db_is_hdmi_colorimetry_data_block(db))
+			drm_parse_colorimetry_data_block(connector, db);
 	}
 }
 
 static void drm_add_display_info(struct drm_connector *connector,
-				 struct edid *edid)
+				 struct edid *edid, u32 quirks)
 {
 	struct drm_display_info *info = &connector->display_info;
 
+	memset(info, 0, sizeof(struct drm_display_info));
 	info->width_mm = edid->width_cm * 10;
 	info->height_mm = edid->height_cm * 10;
 
@@ -4402,6 +4516,8 @@ static void drm_add_display_info(struct drm_connector *connector,
 	info->cea_rev = 0;
 	info->max_tmds_clock = 0;
 	info->dvi_dual = false;
+
+	info->non_desktop = !!(quirks & EDID_QUIRK_NON_DESKTOP);
 
 	if (edid->revision < 3)
 		return;
@@ -4623,7 +4739,7 @@ int drm_add_edid_modes(struct drm_connector *connector, struct edid *edid)
 	 * To avoid multiple parsing of same block, lets parse that map
 	 * from sink info, before parsing CEA modes.
 	 */
-	drm_add_display_info(connector, edid);
+	drm_add_display_info(connector, edid, quirks);
 
 	/*
 	 * EDID spec says modes should be preferred in this order:
@@ -4739,6 +4855,58 @@ void drm_set_preferred_mode(struct drm_connector *connector,
 EXPORT_SYMBOL(drm_set_preferred_mode);
 
 /**
+ * drm_hdmi_infoframe_set_hdr_metadata() - fill an HDMI AVI infoframe with
+ *                                              HDR metadata from userspace
+ * @frame: HDMI AVI infoframe
+ * @hdr_source_metadata: hdr_source_metadata info from userspace
+ *
+ * Return: 0 on success or a negative error code on failure.
+ */
+int
+drm_hdmi_infoframe_set_hdr_metadata(struct hdmi_drm_infoframe *frame,
+				   void *hdr_metadata)
+{
+	struct hdr_static_metadata *hdr_source_metadata;
+	int err, i;
+
+	if (!frame || !hdr_metadata)
+		return -EINVAL;
+
+	err = hdmi_drm_infoframe_init(frame);
+	if (err < 0)
+		return err;
+
+	hdr_source_metadata = (struct hdr_static_metadata *)hdr_metadata;
+
+	frame->length = sizeof(struct hdr_static_metadata);
+
+	frame->eotf = hdr_source_metadata->eotf;
+	frame->metadata_type = hdr_source_metadata->type;
+
+	for (i = 0; i < 3; i++) {
+		frame->display_primaries_x[i] =
+			hdr_source_metadata->display_primaries_x[i];
+		frame->display_primaries_y[i] =
+			hdr_source_metadata->display_primaries_y[i];
+	}
+
+	frame->white_point_x = hdr_source_metadata->white_point_x;
+	frame->white_point_y = hdr_source_metadata->white_point_y;
+
+	frame->max_mastering_display_luminance =
+		hdr_source_metadata->max_mastering_display_luminance;
+	frame->min_mastering_display_luminance =
+		hdr_source_metadata->min_mastering_display_luminance;
+
+	frame->max_cll = hdr_source_metadata->max_cll;
+	frame->max_fall = hdr_source_metadata->max_fall;
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_hdmi_infoframe_set_hdr_metadata);
+
+
+/**
  * drm_hdmi_avi_infoframe_from_display_mode() - fill an HDMI AVI infoframe with
  *                                              data from a DRM display mode
  * @frame: HDMI AVI infoframe
@@ -4789,6 +4957,14 @@ drm_hdmi_avi_infoframe_from_display_mode(struct hdmi_avi_infoframe *frame,
 	}
 
 	frame->picture_aspect = HDMI_PICTURE_ASPECT_NONE;
+
+	/*
+	 * As some drivers don't support atomic, we can't use connector state.
+	 * So just initialize the frame with default values, just the same way
+	 * as it's done with other properties here.
+	 */
+	frame->content_type = HDMI_CONTENT_TYPE_GRAPHICS;
+	frame->itc = 0;
 
 	/*
 	 * Populate picture aspect ratio from either

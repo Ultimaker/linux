@@ -35,6 +35,8 @@ struct mmc_bus_ops {
 	int (*reset)(struct mmc_host *);
 };
 
+extern bool mmc_use_blk_mq;
+
 void mmc_attach_bus(struct mmc_host *host, const struct mmc_bus_ops *ops);
 void mmc_detach_bus(struct mmc_host *host);
 
@@ -80,6 +82,8 @@ int mmc_attach_mmc(struct mmc_host *host);
 int mmc_attach_sd(struct mmc_host *host);
 int mmc_attach_sdio(struct mmc_host *host);
 
+int mmc_first_nonreserved_index(void);
+int mmc_get_reserved_index(struct mmc_host *host);
 /* Module parameters */
 extern bool use_spi_crc;
 
@@ -107,6 +111,8 @@ static inline void mmc_unregister_pm_notifier(struct mmc_host *host) { }
 void mmc_wait_for_req_done(struct mmc_host *host, struct mmc_request *mrq);
 bool mmc_is_req_done(struct mmc_host *host, struct mmc_request *mrq);
 
+int mmc_start_request(struct mmc_host *host, struct mmc_request *mrq);
+
 struct mmc_async_req;
 
 struct mmc_async_req *mmc_start_areq(struct mmc_host *host,
@@ -128,10 +134,11 @@ int mmc_set_blocklen(struct mmc_card *card, unsigned int blocklen);
 int mmc_set_blockcount(struct mmc_card *card, unsigned int blockcount,
 			bool is_rel_write);
 
-int __mmc_claim_host(struct mmc_host *host, atomic_t *abort);
+int __mmc_claim_host(struct mmc_host *host, struct mmc_ctx *ctx,
+		     atomic_t *abort);
 void mmc_release_host(struct mmc_host *host);
-void mmc_get_card(struct mmc_card *card);
-void mmc_put_card(struct mmc_card *card);
+void mmc_get_card(struct mmc_card *card, struct mmc_ctx *ctx);
+void mmc_put_card(struct mmc_card *card, struct mmc_ctx *ctx);
 
 /**
  *	mmc_claim_host - exclusively claim a host
@@ -141,7 +148,42 @@ void mmc_put_card(struct mmc_card *card);
  */
 static inline void mmc_claim_host(struct mmc_host *host)
 {
-	__mmc_claim_host(host, NULL);
+	__mmc_claim_host(host, NULL, NULL);
+}
+
+int mmc_cqe_start_req(struct mmc_host *host, struct mmc_request *mrq);
+void mmc_cqe_post_req(struct mmc_host *host, struct mmc_request *mrq);
+int mmc_cqe_recovery(struct mmc_host *host);
+
+/**
+ *	mmc_pre_req - Prepare for a new request
+ *	@host: MMC host to prepare command
+ *	@mrq: MMC request to prepare for
+ *
+ *	mmc_pre_req() is called in prior to mmc_start_req() to let
+ *	host prepare for the new request. Preparation of a request may be
+ *	performed while another request is running on the host.
+ */
+static inline void mmc_pre_req(struct mmc_host *host, struct mmc_request *mrq)
+{
+	if (host->ops->pre_req)
+		host->ops->pre_req(host, mrq);
+}
+
+/**
+ *	mmc_post_req - Post process a completed request
+ *	@host: MMC host to post process command
+ *	@mrq: MMC request to post process for
+ *	@err: Error, if non zero, clean up any resources made in pre_req
+ *
+ *	Let the host post process a completed request. Post processing of
+ *	a request may be performed while another request is running.
+ */
+static inline void mmc_post_req(struct mmc_host *host, struct mmc_request *mrq,
+				int err)
+{
+	if (host->ops->post_req)
+		host->ops->post_req(host, mrq, err);
 }
 
 #endif

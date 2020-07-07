@@ -41,7 +41,7 @@ config SPI_ASPEED_SMC
 
 config SPI_ATMEL_QUADSPI
 	tristate "Atmel Quad SPI Controller"
-	depends on ARCH_AT91 || (ARM && COMPILE_TEST)
+	depends on ARCH_AT91 || (ARM && COMPILE_TEST && !ARCH_EBSA110)
 	depends on OF && HAS_IOMEM
 	help
 	  This enables support for the Quad SPI controller in master mode.
@@ -128,5 +128,11 @@ config SPI_STM32_QUADSPI
 	help
 	  This enables support for the STM32 Quad SPI controller.
 	  We only connect the NOR to this controller.
+
+config SPI_FSL_FLEXSPI
+	tristate "Freescale Flex SPI controller"
+	help
+	  This enables support for the Flex SPI controller in master mode.
+	  We only connect the NOR to this controller now.
 
 endif # MTD_SPI_NOR

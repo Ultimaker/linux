@@ -45,7 +45,7 @@ static int gen_pci_parse_request_of_pci_ranges(struct device *dev,
 
 		switch (resource_type(res)) {
 		case IORESOURCE_IO:
-			err = pci_remap_iospace(res, iobase);
+			err = devm_pci_remap_iospace(dev, res, iobase);
 			if (err) {
 				dev_warn(dev, "error %d: failed to map resource %pR\n",
 					 err, res);
@@ -176,5 +176,19 @@ int pci_host_common_probe(struct platform_device *pdev,
 	}
 
 	pci_bus_add_devices(bus);
+
+	platform_set_drvdata(pdev, bus);
+	return 0;
+}
+
+int pci_host_common_remove(struct platform_device *pdev)
+{
+	struct pci_bus *bus = platform_get_drvdata(pdev);
+
+	pci_lock_rescan_remove();
+	pci_stop_root_bus(bus);
+	pci_remove_root_bus(bus);
+	pci_unlock_rescan_remove();
+
 	return 0;
 }

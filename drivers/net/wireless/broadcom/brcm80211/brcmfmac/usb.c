@@ -30,6 +30,7 @@
 #include "core.h"
 #include "common.h"
 #include "bcdc.h"
+#include "cfg80211.h"
 
 
 #define IOCTL_RESP_TIMEOUT		msecs_to_jiffies(2000)
@@ -1128,12 +1129,30 @@ static void brcmf_usb_wowl_config(struct device *dev, bool enabled)
 		device_set_wakeup_enable(devinfo->dev, false);
 }
 
+static int brcmf_usb_get_fwname(struct device *dev, u32 chip, u32 chiprev,
+				u8 *fw_name)
+{
+	struct brcmf_usbdev_info *devinfo = brcmf_usb_get_businfo(dev);
+	int ret = 0;
+
+	if (devinfo->fw_name[0] != '\0')
+		strlcpy(fw_name, devinfo->fw_name, BRCMF_FW_NAME_LEN);
+	else
+		ret = brcmf_fw_map_chip_to_name(chip, chiprev,
+						brcmf_usb_fwnames,
+						ARRAY_SIZE(brcmf_usb_fwnames),
+						fw_name, NULL);
+
+	return ret;
+}
+
 static const struct brcmf_bus_ops brcmf_usb_bus_ops = {
 	.txdata = brcmf_usb_tx,
 	.stop = brcmf_usb_down,
 	.txctl = brcmf_usb_tx_ctlpkt,
 	.rxctl = brcmf_usb_rx_ctlpkt,
 	.wowl_config = brcmf_usb_wowl_config,
+	.get_fwname = brcmf_usb_get_fwname,
 };
 
 static int brcmf_usb_bus_setup(struct brcmf_usbdev_info *devinfo)
@@ -1421,8 +1440,22 @@ static int brcmf_usb_suspend(struct usb_interface *intf, pm_message_t state)
 {
 	struct usb_device *usb = interface_to_usbdev(intf);
 	struct brcmf_usbdev_info *devinfo = brcmf_usb_get_businfo(&usb->dev);
+	struct brcmf_bus *bus;
+	struct brcmf_cfg80211_info *config;
+	int retry = BRCMF_PM_WAIT_MAXRETRY;
 
 	brcmf_dbg(USB, "Enter\n");
+
+	bus = devinfo->bus_pub.bus;
+	config = bus->drvr->config;
+	while (retry &&
+	       config->pm_state == BRCMF_CFG80211_PM_STATE_SUSPENDING) {
+		usleep_range(10000, 20000);
+		retry--;
+	}
+	if (!retry && config->pm_state == BRCMF_CFG80211_PM_STATE_SUSPENDING)
+		brcmf_err("timed out wait for cfg80211 suspended\n");
+
 	devinfo->bus_pub.state = BRCMFMAC_USB_STATE_SLEEP;
 	if (devinfo->wowl_enabled)
 		brcmf_cancel_all_urbs(devinfo);

@@ -157,6 +157,11 @@ struct drm_hdmi_info {
 
 	/** @y420_dc_modes: bitmap of deep color support index */
 	u8 y420_dc_modes;
+
+	/* Colorimerty info from EDID */
+	u32 colorimetry;
+	/* Panel HDR capabilities */
+	struct hdr_static_metadata hdr_panel_metadata;
 };
 
 /**
@@ -281,6 +286,11 @@ struct drm_display_info {
 	u8 cea_rev;
 
 	/**
+	 * @non_desktop: Non desktop display (HMD)
+	 */
+	bool non_desktop;
+
+	/**
 	 * @hdmi: advance features of a HDMI sink.
 	 */
 	struct drm_hdmi_info hdmi;
@@ -359,10 +369,30 @@ struct drm_connector_state {
 	enum hdmi_picture_aspect picture_aspect_ratio;
 
 	/**
+	 * @content_type: Connector property to control the
+	 * HDMI infoframe content type setting.
+	 * The %DRM_MODE_CONTENT_TYPE_\* values much
+	 * match the values.
+	 */
+	unsigned int content_type;
+
+	/**
 	 * @scaling_mode: Connector property to control the
 	 * upscaling, mostly used for built-in panels.
 	 */
 	unsigned int scaling_mode;
+
+	/**
+	 * @metadata_blob_ptr:
+	 * DRM blob property for HDR metadata
+	 */
+	struct drm_property_blob *hdr_source_metadata_blob_ptr;
+	bool hdr_metadata_changed : 1;
+	/**
+	 * @content_protection: Connector property to request content
+	 * protection. This is most commonly used for HDCP.
+	 */
+	unsigned int content_protection;
 };
 
 /**
@@ -711,6 +741,7 @@ struct drm_cmdline_mode {
  * @tile_h_size: horizontal size of this tile.
  * @tile_v_size: vertical size of this tile.
  * @scaling_mode_property:  Optional atomic property to control the upscaling.
+ * @content_protection_property: Optional property to control content protection
  *
  * Each connector may be connected to one or more CRTCs, or may be clonable by
  * another connector if they can share a CRTC.  Each connector also has a specific
@@ -800,6 +831,12 @@ struct drm_connector {
 	struct drm_object_properties properties;
 
 	struct drm_property *scaling_mode_property;
+
+	/**
+	 * @content_protection_property: DRM ENUM property for content
+	 * protection
+	 */
+	struct drm_property *content_protection_property;
 
 	/**
 	 * @path_blob_ptr:
@@ -905,6 +942,9 @@ struct drm_connector {
 	uint8_t num_h_tile, num_v_tile;
 	uint8_t tile_h_loc, tile_v_loc;
 	uint16_t tile_h_size, tile_v_size;
+
+	/* HDR metdata */
+	struct hdr_static_metadata *hdr_source_metadata;
 };
 
 #define obj_to_connector(x) container_of(x, struct drm_connector, base)
@@ -933,10 +973,11 @@ static inline unsigned drm_connector_index(struct drm_connector *connector)
  * add takes a reference to it.
  */
 static inline struct drm_connector *drm_connector_lookup(struct drm_device *dev,
+		struct drm_file *file_priv,
 		uint32_t id)
 {
 	struct drm_mode_object *mo;
-	mo = drm_mode_object_find(dev, id, DRM_MODE_OBJECT_CONNECTOR);
+	mo = drm_mode_object_find(dev, file_priv, id, DRM_MODE_OBJECT_CONNECTOR);
 	return mo ? obj_to_connector(mo) : NULL;
 }
 
@@ -994,15 +1035,23 @@ const char *drm_get_dvi_i_subconnector_name(int val);
 const char *drm_get_dvi_i_select_name(int val);
 const char *drm_get_tv_subconnector_name(int val);
 const char *drm_get_tv_select_name(int val);
+const char *drm_get_content_protection_name(int val);
 
 int drm_mode_create_dvi_i_properties(struct drm_device *dev);
 int drm_mode_create_tv_properties(struct drm_device *dev,
 				  unsigned int num_modes,
 				  const char * const modes[]);
 int drm_mode_create_scaling_mode_property(struct drm_device *dev);
+int drm_connector_attach_content_type_property(struct drm_connector *dev);
 int drm_connector_attach_scaling_mode_property(struct drm_connector *connector,
 					       u32 scaling_mode_mask);
+int drm_connector_attach_content_protection_property(
+		struct drm_connector *connector);
 int drm_mode_create_aspect_ratio_property(struct drm_device *dev);
+int drm_mode_create_content_type_property(struct drm_device *dev);
+void drm_hdmi_avi_infoframe_content_type(struct hdmi_avi_infoframe *frame,
+					 const struct drm_connector_state *conn_state);
+
 int drm_mode_create_suggested_offset_properties(struct drm_device *dev);
 
 int drm_mode_connector_set_path_property(struct drm_connector *connector,

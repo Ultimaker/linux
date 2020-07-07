@@ -312,7 +312,7 @@ void map_destroy(struct mtd_info *mtd);
 ({									\
 	int i, ret = 1;							\
 	for (i = 0; i < map_words(map); i++) {				\
-		if (((val1).x[i] & (val2).x[i]) != (val2).x[i]) {	\
+		if (((val1).x[i] & (val2).x[i]) != (val3).x[i]) {	\
 			ret = 0;					\
 			break;						\
 		}							\
@@ -446,7 +446,7 @@ static inline void inline_map_copy_from(struct map_info *map, void *to, unsigned
 	if (map->cached)
 		memcpy(to, (char *)map->cached + from, len);
 	else
-		memcpy_fromio(to, map->virt + from, len);
+		memcpy(to, map->virt + from, len);
 }
 
 static inline void inline_map_copy_to(struct map_info *map, unsigned long to, const void *from, ssize_t len)

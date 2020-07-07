@@ -256,7 +256,7 @@ radeon_connector_update_scratch_regs(struct drm_connector *connector, enum drm_c
 		if (connector->encoder_ids[i] == 0)
 			break;
 
-		encoder = drm_encoder_find(connector->dev,
+		encoder = drm_encoder_find(connector->dev, NULL,
 					   connector->encoder_ids[i]);
 		if (!encoder)
 			continue;
@@ -283,7 +283,7 @@ static struct drm_encoder *radeon_find_encoder(struct drm_connector *connector, 
 		if (connector->encoder_ids[i] == 0)
 			break;
 
-		encoder = drm_encoder_find(connector->dev, connector->encoder_ids[i]);
+		encoder = drm_encoder_find(connector->dev, NULL, connector->encoder_ids[i]);
 		if (!encoder)
 			continue;
 
@@ -397,7 +397,7 @@ static struct drm_encoder *radeon_best_single_encoder(struct drm_connector *conn
 	int enc_id = connector->encoder_ids[0];
 	/* pick the encoder ids */
 	if (enc_id)
-		return drm_encoder_find(connector->dev, enc_id);
+		return drm_encoder_find(connector->dev, NULL, enc_id);
 	return NULL;
 }
 
@@ -853,7 +853,7 @@ static int radeon_lvds_get_modes(struct drm_connector *connector)
 	return ret;
 }
 
-static int radeon_lvds_mode_valid(struct drm_connector *connector,
+static enum drm_mode_status radeon_lvds_mode_valid(struct drm_connector *connector,
 				  struct drm_display_mode *mode)
 {
 	struct drm_encoder *encoder = radeon_best_single_encoder(connector);
@@ -1013,7 +1013,7 @@ static int radeon_vga_get_modes(struct drm_connector *connector)
 	return ret;
 }
 
-static int radeon_vga_mode_valid(struct drm_connector *connector,
+static enum drm_mode_status radeon_vga_mode_valid(struct drm_connector *connector,
 				  struct drm_display_mode *mode)
 {
 	struct drm_device *dev = connector->dev;
@@ -1157,7 +1157,7 @@ static int radeon_tv_get_modes(struct drm_connector *connector)
 	return 1;
 }
 
-static int radeon_tv_mode_valid(struct drm_connector *connector,
+static enum drm_mode_status radeon_tv_mode_valid(struct drm_connector *connector,
 				struct drm_display_mode *mode)
 {
 	if ((mode->hdisplay > 1024) || (mode->vdisplay > 768))
@@ -1379,7 +1379,7 @@ radeon_dvi_detect(struct drm_connector *connector, bool force)
 			if (connector->encoder_ids[i] == 0)
 				break;
 
-			encoder = drm_encoder_find(connector->dev,
+			encoder = drm_encoder_find(connector->dev, NULL,
 						   connector->encoder_ids[i]);
 			if (!encoder)
 				continue;
@@ -1467,7 +1467,7 @@ static struct drm_encoder *radeon_dvi_encoder(struct drm_connector *connector)
 		if (connector->encoder_ids[i] == 0)
 			break;
 
-		encoder = drm_encoder_find(connector->dev, connector->encoder_ids[i]);
+		encoder = drm_encoder_find(connector->dev, NULL, connector->encoder_ids[i]);
 		if (!encoder)
 			continue;
 
@@ -1486,7 +1486,7 @@ static struct drm_encoder *radeon_dvi_encoder(struct drm_connector *connector)
 	/* then check use digitial */
 	/* pick the first one */
 	if (enc_id)
-		return drm_encoder_find(connector->dev, enc_id);
+		return drm_encoder_find(connector->dev, NULL, enc_id);
 	return NULL;
 }
 
@@ -1499,7 +1499,7 @@ static void radeon_dvi_force(struct drm_connector *connector)
 		radeon_connector->use_digital = true;
 }
 
-static int radeon_dvi_mode_valid(struct drm_connector *connector,
+static enum drm_mode_status radeon_dvi_mode_valid(struct drm_connector *connector,
 				  struct drm_display_mode *mode)
 {
 	struct drm_device *dev = connector->dev;
@@ -1633,7 +1633,7 @@ u16 radeon_connector_encoder_get_dp_bridge_encoder_id(struct drm_connector *conn
 		if (connector->encoder_ids[i] == 0)
 			break;
 
-		encoder = drm_encoder_find(connector->dev, connector->encoder_ids[i]);
+		encoder = drm_encoder_find(connector->dev, NULL, connector->encoder_ids[i]);
 		if (!encoder)
 			continue;
 
@@ -1662,7 +1662,7 @@ static bool radeon_connector_encoder_is_hbr2(struct drm_connector *connector)
 		if (connector->encoder_ids[i] == 0)
 			break;
 
-		encoder = drm_encoder_find(connector->dev, connector->encoder_ids[i]);
+		encoder = drm_encoder_find(connector->dev, NULL, connector->encoder_ids[i]);
 		if (!encoder)
 			continue;
 
@@ -1801,7 +1801,7 @@ out:
 	return ret;
 }
 
-static int radeon_dp_mode_valid(struct drm_connector *connector,
+static enum drm_mode_status radeon_dp_mode_valid(struct drm_connector *connector,
 				  struct drm_display_mode *mode)
 {
 	struct drm_device *dev = connector->dev;

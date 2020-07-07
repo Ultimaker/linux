@@ -90,6 +90,7 @@ struct generic_pm_domain {
 		};
 	};
 
+	unsigned int state_idx_saved; /* saved power state for recovery after system suspend/resume */
 };
 
 static inline struct generic_pm_domain *pd_to_genpd(struct dev_pm_domain *pd)
@@ -233,6 +234,8 @@ extern int of_genpd_parse_idle_states(struct device_node *dn,
 			struct genpd_power_state **states, int *n);
 
 int genpd_dev_pm_attach(struct device *dev);
+struct generic_pm_domain *genpd_get_from_provider(
+				struct of_phandle_args *genpdspec);
 #else /* !CONFIG_PM_GENERIC_DOMAINS_OF */
 static inline int of_genpd_add_provider_simple(struct device_node *np,
 					struct generic_pm_domain *genpd)
@@ -273,6 +276,13 @@ static inline int genpd_dev_pm_attach(struct device *dev)
 
 static inline
 struct generic_pm_domain *of_genpd_remove_last(struct device_node *np)
+{
+	return ERR_PTR(-ENOTSUPP);
+}
+
+static inline
+struct generic_pm_domain *genpd_get_from_provider(
+				struct of_phandle_args *genpdspec)
 {
 	return ERR_PTR(-ENOTSUPP);
 }

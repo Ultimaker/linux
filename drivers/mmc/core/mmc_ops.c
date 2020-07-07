@@ -585,6 +585,12 @@ out_tim:
 	if (timing)
 		mmc_set_timing(host, timing);
 
+	/*
+	 * WORKAROUND: for Sandisk eMMC cards, it might need certain delay
+	 * before sending CMD13 after CMD6
+	 */
+	mdelay(1);
+
 	if (send_status) {
 		err = mmc_switch_status(card);
 		if (err && timing)
@@ -1010,6 +1016,7 @@ void mmc_start_bkops(struct mmc_card *card, bool from_exception)
 out:
 	mmc_release_host(card->host);
 }
+EXPORT_SYMBOL(mmc_start_bkops);
 
 /*
  * Flush the cache to the non-volatile storage.

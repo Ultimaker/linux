@@ -111,12 +111,6 @@ void mmc_retune_hold(struct mmc_host *host)
 	host->hold_retune += 1;
 }
 
-void mmc_retune_hold_now(struct mmc_host *host)
-{
-	host->retune_now = 0;
-	host->hold_retune += 1;
-}
-
 void mmc_retune_release(struct mmc_host *host)
 {
 	if (host->hold_retune)
@@ -124,6 +118,7 @@ void mmc_retune_release(struct mmc_host *host)
 	else
 		WARN_ON(1);
 }
+EXPORT_SYMBOL(mmc_retune_release);
 
 int mmc_retune(struct mmc_host *host)
 {
@@ -232,6 +227,8 @@ int mmc_of_parse(struct mmc_host *host)
 	/* Parse Card Detection */
 	if (device_property_read_bool(dev, "non-removable")) {
 		host->caps |= MMC_CAP_NONREMOVABLE;
+		if (device_property_read_bool(dev, "cd-post"))
+			host->caps2 |= MMC_CAP2_CD_POST;
 	} else {
 		cd_cap_invert = device_property_read_bool(dev, "cd-inverted");
 
@@ -305,6 +302,8 @@ int mmc_of_parse(struct mmc_host *host)
 		host->pm_caps |= MMC_PM_WAKE_SDIO_IRQ;
 	if (device_property_read_bool(dev, "mmc-ddr-3_3v"))
 		host->caps |= MMC_CAP_3_3V_DDR;
+	if (device_property_read_bool(dev, "pm-ignore-notify"))
+		host->pm_caps |= MMC_PM_IGNORE_PM_NOTIFY;
 	if (device_property_read_bool(dev, "mmc-ddr-1_8v"))
 		host->caps |= MMC_CAP_1_8V_DDR;
 	if (device_property_read_bool(dev, "mmc-ddr-1_2v"))
@@ -349,6 +348,7 @@ EXPORT_SYMBOL(mmc_of_parse);
 struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 {
 	int err;
+	int alias_id;
 	struct mmc_host *host;
 
 	host = kzalloc(sizeof(struct mmc_host) + extra, GFP_KERNEL);
@@ -357,8 +357,16 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 
 	/* scanning will be enabled when we're ready */
 	host->rescan_disable = 1;
+	host->parent = dev;
 
-	err = ida_simple_get(&mmc_host_ida, 0, 0, GFP_KERNEL);
+	alias_id = mmc_get_reserved_index(host);
+	if (alias_id >= 0)
+		err = ida_simple_get(&mmc_host_ida, alias_id,
+					alias_id + 1, GFP_KERNEL);
+	else
+		err = ida_simple_get(&mmc_host_ida,
+					mmc_first_nonreserved_index(),
+					0, GFP_KERNEL);
 	if (err < 0) {
 		kfree(host);
 		return NULL;
@@ -368,7 +376,6 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 
 	dev_set_name(&host->class_dev, "mmc%d", host->index);
 
-	host->parent = dev;
 	host->class_dev.parent = dev;
 	host->class_dev.class = &mmc_host_class;
 	device_initialize(&host->class_dev);
@@ -397,6 +404,8 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 	host->max_req_size = PAGE_SIZE;
 	host->max_blk_size = 512;
 	host->max_blk_count = PAGE_SIZE / 512;
+
+	host->use_blk_mq = mmc_use_blk_mq;
 
 	return host;
 }
@@ -429,7 +438,8 @@ int mmc_add_host(struct mmc_host *host)
 #endif
 
 	mmc_start_host(host);
-	mmc_register_pm_notifier(host);
+	if (!(host->pm_caps& MMC_PM_IGNORE_PM_NOTIFY))
+		mmc_register_pm_notifier(host);
 
 	return 0;
 }
@@ -446,7 +456,8 @@ EXPORT_SYMBOL(mmc_add_host);
  */
 void mmc_remove_host(struct mmc_host *host)
 {
-	mmc_unregister_pm_notifier(host);
+	if (!(host->pm_caps& MMC_PM_IGNORE_PM_NOTIFY))
+		mmc_unregister_pm_notifier(host);
 	mmc_stop_host(host);
 
 #ifdef CONFIG_DEBUG_FS

@@ -90,6 +90,13 @@ extern "C" {
 #define DRM_MODE_PICTURE_ASPECT_4_3		1
 #define DRM_MODE_PICTURE_ASPECT_16_9		2
 
+/* Content type options */
+#define DRM_MODE_CONTENT_TYPE_NO_DATA		0
+#define DRM_MODE_CONTENT_TYPE_GRAPHICS		1
+#define DRM_MODE_CONTENT_TYPE_PHOTO		2
+#define DRM_MODE_CONTENT_TYPE_CINEMA		3
+#define DRM_MODE_CONTENT_TYPE_GAME		4
+
 /* Aspect ratio flag bitmask (4 bits 22:19) */
 #define DRM_MODE_FLAG_PIC_AR_MASK		(0x0F<<19)
 #define  DRM_MODE_FLAG_PIC_AR_NONE \
@@ -173,6 +180,10 @@ extern "C" {
 		DRM_MODE_REFLECT_X | \
 		DRM_MODE_REFLECT_Y)
 
+/* Content Protection Flags */
+#define DRM_MODE_CONTENT_PROTECTION_UNDESIRED	0
+#define DRM_MODE_CONTENT_PROTECTION_DESIRED     1
+#define DRM_MODE_CONTENT_PROTECTION_ENABLED     2
 
 struct drm_mode_modeinfo {
 	__u32 clock;
@@ -590,6 +601,27 @@ struct drm_color_lut {
 	__u16 reserved;
 };
 
+enum supported_eotf_type {
+	TRADITIONAL_GAMMA_SDR = 0,
+	TRADITIONA_GAMMA_HDR,
+	SMPTE_ST2084,
+	FUTURE_EOTF
+};
+
+/* HDR Metadata */
+struct hdr_static_metadata {
+	uint8_t eotf;
+	uint8_t type;
+	uint16_t display_primaries_x[3];
+	uint16_t display_primaries_y[3];
+	uint16_t white_point_x;
+	uint16_t white_point_y;
+	uint16_t max_mastering_display_luminance;
+	uint16_t min_mastering_display_luminance;
+	uint16_t max_fall;
+	uint16_t max_cll;
+};
+
 #define DRM_MODE_PAGE_FLIP_EVENT 0x01
 #define DRM_MODE_PAGE_FLIP_ASYNC 0x02
 #define DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE 0x4
@@ -780,6 +812,72 @@ struct drm_mode_create_blob {
  */
 struct drm_mode_destroy_blob {
 	__u32 blob_id;
+};
+
+/**
+ * Lease mode resources, creating another drm_master.
+ */
+struct drm_mode_create_lease {
+	/** Pointer to array of object ids (__u32) */
+	__u64 object_ids;
+	/** Number of object ids */
+	__u32 object_count;
+	/** flags for new FD (O_CLOEXEC, etc) */
+	__u32 flags;
+
+	/** Return: unique identifier for lessee. */
+	__u32 lessee_id;
+	/** Return: file descriptor to new drm_master file */
+	__u32 fd;
+};
+
+/**
+ * List lesses from a drm_master
+ */
+struct drm_mode_list_lessees {
+	/** Number of lessees.
+	 * On input, provides length of the array.
+	 * On output, provides total number. No
+	 * more than the input number will be written
+	 * back, so two calls can be used to get
+	 * the size and then the data.
+	 */
+	__u32 count_lessees;
+	__u32 pad;
+
+	/** Pointer to lessees.
+	 * pointer to __u64 array of lessee ids
+	 */
+	__u64 lessees_ptr;
+};
+
+/**
+ * Get leased objects
+ */
+struct drm_mode_get_lease {
+	/** Number of leased objects.
+	 * On input, provides length of the array.
+	 * On output, provides total number. No
+	 * more than the input number will be written
+	 * back, so two calls can be used to get
+	 * the size and then the data.
+	 */
+	__u32 count_objects;
+	__u32 pad;
+
+	/** Pointer to objects.
+	 * pointer to __u32 array of object ids
+	 */
+	__u64 objects_ptr;
+};
+
+/**
+ * Revoke lease
+ */
+struct drm_mode_revoke_lease {
+	/** Unique ID of lessee
+	 */
+	__u32 lessee_id;
 };
 
 #if defined(__cplusplus)

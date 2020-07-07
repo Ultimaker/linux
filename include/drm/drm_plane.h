@@ -515,6 +515,9 @@ struct drm_plane {
 
 	enum drm_plane_type type;
 
+	/* Value of true:1 means HDR is supported */
+	bool hdr_supported;
+
 	/**
 	 * @index: Position inside the mode_config.list, can be used as an array
 	 * index. It is invariant over the lifetime of the plane.
@@ -589,10 +592,11 @@ int drm_mode_plane_set_obj_prop(struct drm_plane *plane,
  * drm_mode_object_find().
  */
 static inline struct drm_plane *drm_plane_find(struct drm_device *dev,
+		struct drm_file *file_priv,
 		uint32_t id)
 {
 	struct drm_mode_object *mo;
-	mo = drm_mode_object_find(dev, id, DRM_MODE_OBJECT_PLANE);
+	mo = drm_mode_object_find(dev, file_priv, id, DRM_MODE_OBJECT_PLANE);
 	return mo ? obj_to_plane(mo) : NULL;
 }
 

@@ -64,6 +64,7 @@
 struct virtproc_info {
 	struct virtio_device *vdev;
 	struct virtqueue *rvq, *svq;
+	struct device *bufs_dev;
 	void *rbufs, *sbufs;
 	unsigned int num_bufs;
 	unsigned int buf_size;
@@ -204,16 +205,17 @@ static const struct rpmsg_endpoint_ops virtio_endpoint_ops = {
  * location (in vmalloc or in kernel).
  */
 static void
-rpmsg_sg_init(struct scatterlist *sg, void *cpu_addr, unsigned int len)
+rpmsg_sg_init(struct virtproc_info *vrp, struct scatterlist *sg,
+	      void *cpu_addr, unsigned int len)
 {
-	if (is_vmalloc_addr(cpu_addr)) {
-		sg_init_table(sg, 1);
-		sg_set_page(sg, vmalloc_to_page(cpu_addr), len,
-			    offset_in_page(cpu_addr));
-	} else {
-		WARN_ON(!virt_addr_valid(cpu_addr));
-		sg_init_one(sg, cpu_addr, len);
-	}
+	unsigned int offset;
+	dma_addr_t dev_add = vrp->bufs_dma + (cpu_addr - vrp->rbufs);
+	struct page *page = pfn_to_page(PHYS_PFN(dma_to_phys(vrp->bufs_dev,
+					dev_add)));
+
+	offset = offset_in_page(cpu_addr);
+	sg_init_table(sg, 1);
+	sg_set_page(sg, page, len, offset);
 }
 
 /**
@@ -634,7 +636,7 @@ static int rpmsg_send_offchannel_raw(struct rpmsg_device *rpdev,
 			 msg, sizeof(*msg) + msg->len, true);
 #endif
 
-	rpmsg_sg_init(&sg, msg, sizeof(*msg) + len);
+	rpmsg_sg_init(vrp, &sg, msg, sizeof(*msg) + len);
 
 	mutex_lock(&vrp->tx_lock);
 
@@ -758,7 +760,7 @@ static int rpmsg_recv_single(struct virtproc_info *vrp, struct device *dev,
 		dev_warn(dev, "msg received with no recipient\n");
 
 	/* publish the real size of the buffer */
-	rpmsg_sg_init(&sg, msg, vrp->buf_size);
+	rpmsg_sg_init(vrp, &sg, msg, vrp->buf_size);
 
 	/* add the buffer back to the remote processor's virtqueue */
 	err = virtqueue_add_inbuf(vrp->rvq, &sg, 1, msg, GFP_KERNEL);
@@ -924,9 +926,16 @@ static int rpmsg_probe(struct virtio_device *vdev)
 				     total_buf_space, &vrp->bufs_dma,
 				     GFP_KERNEL);
 	if (!bufs_va) {
-		err = -ENOMEM;
-		goto vqs_del;
-	}
+		bufs_va = dma_alloc_coherent(vdev->dev.parent,
+					     total_buf_space, &vrp->bufs_dma,
+					     GFP_KERNEL);
+		if (!bufs_va) {
+			err = -ENOMEM;
+			goto vqs_del;
+		} else
+			vrp->bufs_dev = vdev->dev.parent;
+	} else
+		vrp->bufs_dev = vdev->dev.parent->parent;
 
 	dev_dbg(&vdev->dev, "buffers: va %p, dma %pad\n",
 		bufs_va, &vrp->bufs_dma);
@@ -942,7 +951,7 @@ static int rpmsg_probe(struct virtio_device *vdev)
 		struct scatterlist sg;
 		void *cpu_addr = vrp->rbufs + i * vrp->buf_size;
 
-		rpmsg_sg_init(&sg, cpu_addr, vrp->buf_size);
+		rpmsg_sg_init(vrp, &sg, cpu_addr, vrp->buf_size);
 
 		err = virtqueue_add_inbuf(vrp->rvq, &sg, 1, cpu_addr,
 					  GFP_KERNEL);
@@ -988,7 +997,7 @@ static int rpmsg_probe(struct virtio_device *vdev)
 	return 0;
 
 free_coherent:
-	dma_free_coherent(vdev->dev.parent->parent, total_buf_space,
+	dma_free_coherent(vrp->bufs_dev, total_buf_space,
 			  bufs_va, vrp->bufs_dma);
 vqs_del:
 	vdev->config->del_vqs(vrp->vdev);
@@ -1023,7 +1032,7 @@ static void rpmsg_remove(struct virtio_device *vdev)
 
 	vdev->config->del_vqs(vrp->vdev);
 
-	dma_free_coherent(vdev->dev.parent->parent, total_buf_space,
+	dma_free_coherent(vrp->bufs_dev, total_buf_space,
 			  vrp->rbufs, vrp->bufs_dma);
 
 	kfree(vrp);
@@ -1058,7 +1067,7 @@ static int __init rpmsg_init(void)
 
 	return ret;
 }
-subsys_initcall(rpmsg_init);
+arch_initcall(rpmsg_init);
 
 static void __exit rpmsg_fini(void)
 {
