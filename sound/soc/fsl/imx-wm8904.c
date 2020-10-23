@@ -34,7 +34,7 @@ struct imx_priv {
 
 static const struct snd_soc_dapm_widget imx_wm8904_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
-	SND_SOC_DAPM_MIC("Main MIC", NULL),
+	SND_SOC_DAPM_MIC("Mic Jack", NULL),
 	SND_SOC_DAPM_LINE("Line Out Jack", NULL),
 	SND_SOC_DAPM_LINE("Line In Jack", NULL),
 };

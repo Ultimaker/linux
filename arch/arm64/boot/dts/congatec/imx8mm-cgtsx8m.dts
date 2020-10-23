@@ -140,11 +140,12 @@
 			"Line Out Jack", "LINEOUTR",
 			"IN1L", "Line In Jack",
 			"IN1R", "Line In Jack",
-			"IN2R", "Main MIC",
+			"IN2L", "Mic Jack",
+			"IN2R", "Mic Jack",
+			"Mic Jack", "MICBIAS",
 			"Playback", "CPU-Playback",
 			"CPU-Capture", "Capture";
 	};
-
 };
 
 &clk {
