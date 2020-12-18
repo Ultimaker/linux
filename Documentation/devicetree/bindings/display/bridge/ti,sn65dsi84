@@ -1,0 +1,183 @@
+SN65DSI84 DSI Bridge To FLATLINK LVDS
+--------------------------------
+
+This is the binding for Texas Instruments SN65DSI84 bridge.
+http://www.ti.com/general/docs/lit/getliterature.tsp?genericPartNumber=sn65dsi84&fileType=pdf
+
+Required properties:
+
+- compatible: Must be "ti,sn65dsi84"
+- reg: i2c address of the chip, 0x2c as per datasheet
+- pd: Power enable
+- bckl: backlight on pin
+- adi,dsi-lanes
+- adi,dsi-clock
+
+Optional properties:
+
+- adi,disable-timing-generator
+
+
+The chip driver can be configured in three ways:
+
+1) Using predefined vide mode settings activated by providing a mode string.
+
+Required properties:
+
+- lvds,edid = "SN65DSI84_EDID_1280x1024"
+
+  Supported predefined modes:
+
+  - SN65DSI84_EDID_800x600
+  - SN65DSI84_EDID_1024x768
+  - SN65DSI84_EDID_1440x900
+  - SN65DSI84_EDID_1280x1024
+  - SN65DSI84_EDID_1680x1050
+  - SN65DSI84_EDID_1600x1200
+  - SN65DSI84_EDID_1920x1080
+
+2) Using explicit LVDS timing properties.
+
+Required properties: 
+    
+- lvds,pixelclock
+- lvds,hactive
+- lvds,vactive
+- lvds,hfront_porch
+- lvds,hback_porch
+- lvds,hsync_len
+- lvds,vfront_porch
+- lvds,vback_porch
+- lvds,vsync_len 
+- lvds,color_depth
+- lvds,hsync_pol
+- lvds,vsync_pol
+- lvds,datamap
+
+Optional properties:
+
+- lvds,test-mode
+- lvds,dual-channel
+- lvds,channel-reverse
+- lvds,channel-swap
+- lvds,interlaced
+
+3) Using a predefined i2c DDC EDID eeprom.
+
+Required properties:
+
+- i2c-edid: The i2c EDID EEPROM device
+
+Required nodes:
+
+This device one video port. Their connections are modelled using the
+OF graph bindings specified in Documentation/devicetree/bindings/graph.txt.
+
+- port: Video port for DSI input
+
+
+Example using modestring with predefined modes.
+-------
+
+lvdsbridge: sn65dsi84@2c {
+    reg = <0x2c>;
+    status = "okay";
+    compatible = "ti,sn65dsi84";
+    pd = <&gpio1 8 GPIO_ACTIVE_HIGH>;
+    bckl = <&gpio1 1 GPIO_ACTIVE_HIGH>;
+    
+    /* DSI parameters */
+    adi,dsi-lanes = <4>;
+    adi,dsi-clock = <594000000>;
+
+    lvds,edid = "SN65DSI84_EDID_800x600";
+    
+    port {
+        lvds_bridge_from_dsim: endpoint {
+            remote-endpoint = <&dsim_to_lvds_bridge>;
+        };
+    };
+};
+
+Example using devicetree LVDS properties
+-------
+
+lvdsbridge: sn65dsi84@2c {
+    reg = <0x2c>;
+    status = "okay";
+    compatible = "ti,sn65dsi84";
+    pd = <&gpio1 8 GPIO_ACTIVE_HIGH>;
+    bckl = <&gpio1 1 GPIO_ACTIVE_HIGH>;
+    
+    /* DSI parameters */
+    adi,dsi-lanes = <4>;
+    adi,dsi-clock = <594000000>;
+
+    /delete-property/ lvds,use-uboot-settings; // will get replaced by dp props
+    status = "okay";
+
+    lvds,pixelclock = <51206400>;
+    lvds,hactive = <1024>;
+    lvds,vactive = <600>;
+    lvds,hfront_porch = <160>;
+    lvds,hback_porch = <160>;
+    lvds,hsync_len = <10>; // Must be more then 1, number does not matter
+    lvds,vfront_porch = <12>;
+    lvds,vback_porch = <23>;
+    lvds,vsync_len = <10>; // Must be more then 1, number does not matter
+    lvds,color_depth = "rgb24";
+    lvds,hsync_pol = <0>;
+    lvds,vsync_pol = <0>;
+    lvds,datamap = "spwg";
+    
+    port {
+        lvds_bridge_from_dsim: endpoint {
+            remote-endpoint = <&dsim_to_lvds_bridge>;
+        };
+    };
+};
+
+
+Example using EDID EEPROM
+-------
+lvdsbridge: sn65dsi84@2c {
+    reg = <0x2c>;
+    status = "okay";
+    compatible = "ti,sn65dsi84";
+    pd = <&gpio1 8 GPIO_ACTIVE_HIGH>;
+    bckl = <&gpio1 1 GPIO_ACTIVE_HIGH>;
+    
+    /* DSI parameters */
+    adi,dsi-lanes = <4>;
+    adi,dsi-clock = <594000000>;
+
+    /delete-property/ lvds,use-uboot-settings; // will get replaced by dp props
+    status = "okay";
+
+    i2c-edid = <&edid_eeprom>; // This will load the configuration from the EEPROM.
+
+    /*
+       LVDS 1024x600@60Hz pixclock 51.2MHz
+       These settings will be ignored because 'i2c-edid' is defined, leaving them in for documentation
+    */
+    lvds,pixelclock = <51206400>;
+    lvds,hactive = <1024>;
+    lvds,vactive = <600>;
+    lvds,hfront_porch = <160>;
+    lvds,hback_porch = <160>;
+    lvds,hsync_len = <10>; // Must be more then 1, number does not matter
+    lvds,vfront_porch = <12>;
+    lvds,vback_porch = <23>;
+    lvds,vsync_len = <10>; // Must be more then 1, number does not matter
+    lvds,color_depth = "rgb24";
+    lvds,hsync_pol = <0>;
+    lvds,vsync_pol = <0>;
+    lvds,datamap = "spwg";
+    
+    port {
+        lvds_bridge_from_dsim: endpoint {
+            remote-endpoint = <&dsim_to_lvds_bridge>;
+        };
+    };
+};
+

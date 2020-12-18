@@ -7,6 +7,7 @@
  *
  * Licensed under the GPL-2.
  */
+#define DEBUG
 
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
@@ -350,6 +351,23 @@ static int sn65dsi84_get_modes(struct sn65dsi84 *sn65dsi84,
 
 	drm_mode_connector_update_edid_property(connector, (sn65dsi84->edid));
 	count = drm_add_edid_modes(connector, (sn65dsi84->edid));
+
+    if (sn65dsi84->i2c_edid) {
+        DRM_DEBUG("sn65: get_modes(): i2c EDID configured, downloading EDID data\n");
+
+        sn65dsi84->edid = drm_get_edid(connector, sn65dsi84->i2c_edid->adapter);
+
+        if (sn65dsi84->edid) {
+            DRM_INFO("sn65: get_modes(): downloaded i2c EDID data\n");
+            goto init_drm;
+        }
+
+        DRM_DEBUG("sn65: get_modes(): i2c EDID data download failed, trying other configuration modes\n");
+    }
+
+
+init_drm:
+
 
 #ifdef SN65DSI84_DBGPRN
 	pr_info("DSI-sn65: get_modes() check pixel clock: %d\n", connector->display_info.pixel_clock);
@@ -1582,11 +1600,26 @@ static bool sn65dsi84_videomode_parse_dt(struct device_node *np, struct sn65dsi8
 static int sn65dsi84_parse_dt(struct device_node *np, struct sn65dsi84 *adv)
 {
     struct device_node *endpoint;
-	int ret;
+    struct device_node *i2c_edid_np;
+    int ret;
 
-	if(!sn65dsi84_videomode_parse_dt(np, adv)) {
-			return -ENODEV;
-	}
+    DRM_INFO("Try to setup screen using ddc edid.\n");
+    i2c_edid_np = of_parse_phandle(np, "i2c-edid", 0);
+    if (i2c_edid_np) {
+        adv->i2c_edid = of_find_i2c_device_by_node(i2c_edid_np);
+        if (!adv->i2c_edid) {
+            of_node_put(i2c_edid_np);
+            DRM_WARN("Failed to get edid-i2c device\n");
+            return -ENODEV;
+        }
+    }
+
+    if(!sn65dsi84_videomode_parse_dt(np, adv)) {
+        if (!i2c_edid_np)
+            return -ENODEV;
+    }
+
+    of_node_put(i2c_edid_np);
 
     adv->gpio_pd = of_get_named_gpio(np, "pd", 0);
     if (!gpio_is_valid(adv->gpio_pd))
