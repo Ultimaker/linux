@@ -32,7 +32,6 @@
 #include <linux/device.h>
 #include <linux/efi.h>
 #include <linux/fb.h>
-#include <linux/fbcon.h>
 #include <linux/mem_encrypt.h>
 
 #include <asm/fb.h>
@@ -1893,9 +1892,6 @@ fbmem_init(void)
 		fb_class = NULL;
 		goto err_class;
 	}
-
-	fb_console_init();
-
 	return 0;
 
 err_class:
@@ -1910,8 +1906,6 @@ module_init(fbmem_init);
 static void __exit
 fbmem_exit(void)
 {
-	fb_console_exit();
-
 	remove_proc_entry("fb", NULL);
 	class_destroy(fb_class);
 	unregister_chrdev(FB_MAJOR, "fb");

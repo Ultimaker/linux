@@ -1,5 +1,5 @@
 /*
- *  linux/drivers/video/console/fbcon_ccw.c -- Software Rotation - 270 degrees
+ *  linux/drivers/video/console/fbcon_ud.c -- Software Rotation - 90 degrees
  *
  *      Copyright (C) 2005 Antonino Daplas <adaplas @pol.net>
  *
@@ -19,38 +19,23 @@
 #include "fbcon_rotate.h"
 
 /*
- * Rotation 270 degrees
+ * Rotation 90 degrees
  */
 
-static void ccw_update_attr(u8 *dst, u8 *src, int attribute,
+static void cw_update_attr(u8 *dst, u8 *src, int attribute,
 				  struct vc_data *vc)
 {
 	int i, j, offset = (vc->vc_font.height < 10) ? 1 : 2;
 	int width = (vc->vc_font.height + 7) >> 3;
-	int mod = vc->vc_font.height % 8;
-	u8 c, msk = ~(0xff << offset), msk1 = 0;
-
-	if (mod)
-		msk <<= (8 - mod);
-
-	if (offset > mod)
-		msk1 |= 0x01;
+	u8 c, msk = ~(0xff >> offset);
 
 	for (i = 0; i < vc->vc_font.width; i++) {
 		for (j = 0; j < width; j++) {
 			c = *src;
-
-			if (attribute & FBCON_ATTRIBUTE_UNDERLINE) {
-				if (j == width - 1)
-					c |= msk;
-
-				if (msk1 && j == width - 2)
-					c |= msk1;
-			}
-
+			if (attribute & FBCON_ATTRIBUTE_UNDERLINE && !j)
+				c |= msk;
 			if (attribute & FBCON_ATTRIBUTE_BOLD && i)
-				*(dst - width) |= c;
-
+				c |= *(src-width);
 			if (attribute & FBCON_ATTRIBUTE_REVERSE)
 				c = ~c;
 			src++;
@@ -60,34 +45,34 @@ static void ccw_update_attr(u8 *dst, u8 *src, int attribute,
 }
 
 
-static void ccw_bmove(struct vc_data *vc, struct fb_info *info, int sy,
+static void cw_bmove(struct vc_data *vc, struct fb_info *info, int sy,
 		     int sx, int dy, int dx, int height, int width)
 {
 	struct fbcon_ops *ops = info->fbcon_par;
 	struct fb_copyarea area;
-	u32 vyres = GETVYRES(ops->p->scrollmode, info);
+	u32 vxres = GETVXRES(ops->p->scrollmode, info);
 
-	area.sx = sy * vc->vc_font.height;
-	area.sy = vyres - ((sx + width) * vc->vc_font.width);
-	area.dx = dy * vc->vc_font.height;
-	area.dy = vyres - ((dx + width) * vc->vc_font.width);
+	area.sx = vxres - ((sy + height) * vc->vc_font.height);
+	area.sy = sx * vc->vc_font.width;
+	area.dx = vxres - ((dy + height) * vc->vc_font.height);
+	area.dy = dx * vc->vc_font.width;
 	area.width = height * vc->vc_font.height;
 	area.height  = width * vc->vc_font.width;
 
 	info->fbops->fb_copyarea(info, &area);
 }
 
-static void ccw_clear(struct vc_data *vc, struct fb_info *info, int sy,
+static void cw_clear(struct vc_data *vc, struct fb_info *info, int sy,
 		     int sx, int height, int width)
 {
 	struct fbcon_ops *ops = info->fbcon_par;
 	struct fb_fillrect region;
 	int bgshift = (vc->vc_hi_font_mask) ? 13 : 12;
-	u32 vyres = GETVYRES(ops->p->scrollmode, info);
+	u32 vxres = GETVXRES(ops->p->scrollmode, info);
 
 	region.color = attr_bgcol_ec(bgshift,vc,info);
-	region.dx = sy * vc->vc_font.height;
-	region.dy = vyres - ((sx + width) * vc->vc_font.width);
+	region.dx = vxres - ((sy + height) * vc->vc_font.height);
+	region.dy = sx *  vc->vc_font.width;
 	region.height = width * vc->vc_font.width;
 	region.width = height * vc->vc_font.height;
 	region.rop = ROP_COPY;
@@ -95,7 +80,7 @@ static void ccw_clear(struct vc_data *vc, struct fb_info *info, int sy,
 	info->fbops->fb_fillrect(info, &region);
 }
 
-static inline void ccw_putcs_aligned(struct vc_data *vc, struct fb_info *info,
+static inline void cw_putcs_aligned(struct vc_data *vc, struct fb_info *info,
 				    const u16 *s, u32 attr, u32 cnt,
 				    u32 d_pitch, u32 s_pitch, u32 cellsize,
 				    struct fb_image *image, u8 *buf, u8 *dst)
@@ -106,10 +91,10 @@ static inline void ccw_putcs_aligned(struct vc_data *vc, struct fb_info *info,
 	u8 *src;
 
 	while (cnt--) {
-		src = ops->fontbuffer + (scr_readw(s--) & charmask)*cellsize;
+		src = ops->fontbuffer + (scr_readw(s++) & charmask)*cellsize;
 
 		if (attr) {
-			ccw_update_attr(buf, src, attr, vc);
+			cw_update_attr(buf, src, attr, vc);
 			src = buf;
 		}
 
@@ -126,7 +111,7 @@ static inline void ccw_putcs_aligned(struct vc_data *vc, struct fb_info *info,
 	info->fbops->fb_imageblit(info, image);
 }
 
-static void ccw_putcs(struct vc_data *vc, struct fb_info *info,
+static void cw_putcs(struct vc_data *vc, struct fb_info *info,
 		      const unsigned short *s, int count, int yy, int xx,
 		      int fg, int bg)
 {
@@ -140,15 +125,15 @@ static void ccw_putcs(struct vc_data *vc, struct fb_info *info,
 	u32 cnt, pitch, size;
 	u32 attribute = get_attribute(info, scr_readw(s));
 	u8 *dst, *buf = NULL;
-	u32 vyres = GETVYRES(ops->p->scrollmode, info);
+	u32 vxres = GETVXRES(ops->p->scrollmode, info);
 
 	if (!ops->fontbuffer)
 		return;
 
 	image.fg_color = fg;
 	image.bg_color = bg;
-	image.dx = yy * vc->vc_font.height;
-	image.dy = vyres - ((xx + count) * vc->vc_font.width);
+	image.dx = vxres - ((yy + 1) * vc->vc_font.height);
+	image.dy = xx * vc->vc_font.width;
 	image.width = vc->vc_font.height;
 	image.depth = 1;
 
@@ -157,8 +142,6 @@ static void ccw_putcs(struct vc_data *vc, struct fb_info *info,
 		if (!buf)
 			return;
 	}
-
-	s += count - 1;
 
 	while (count) {
 		if (count > maxcnt)
@@ -173,11 +156,11 @@ static void ccw_putcs(struct vc_data *vc, struct fb_info *info,
 		size &= ~buf_align;
 		dst = fb_get_buffer_offset(info, &info->pixmap, size);
 		image.data = dst;
-		ccw_putcs_aligned(vc, info, s, attribute, cnt, pitch,
+		cw_putcs_aligned(vc, info, s, attribute, cnt, pitch,
 				 width, cellsize, &image, buf, dst);
 		image.dy += image.height;
 		count -= cnt;
-		s -= cnt;
+		s += cnt;
 	}
 
 	/* buf is always NULL except when in monochrome mode, so in this case
@@ -188,14 +171,14 @@ static void ccw_putcs(struct vc_data *vc, struct fb_info *info,
 
 }
 
-static void ccw_clear_margins(struct vc_data *vc, struct fb_info *info,
-			      int color, int bottom_only)
+static void cw_clear_margins(struct vc_data *vc, struct fb_info *info,
+			     int color, int bottom_only)
 {
 	unsigned int cw = vc->vc_font.width;
 	unsigned int ch = vc->vc_font.height;
 	unsigned int rw = info->var.yres - (vc->vc_cols*cw);
 	unsigned int bh = info->var.xres - (vc->vc_rows*ch);
-	unsigned int bs = vc->vc_rows*ch;
+	unsigned int rs = info->var.yres - rw;
 	struct fb_fillrect region;
 
 	region.color = color;
@@ -203,23 +186,23 @@ static void ccw_clear_margins(struct vc_data *vc, struct fb_info *info,
 
 	if (rw && !bottom_only) {
 		region.dx = 0;
-		region.dy = info->var.yoffset;
+		region.dy = info->var.yoffset + rs;
 		region.height = rw;
 		region.width = info->var.xres_virtual;
 		info->fbops->fb_fillrect(info, &region);
 	}
 
 	if (bh) {
-		region.dx = info->var.xoffset + bs;
-		region.dy = 0;
-                region.height = info->var.yres_virtual;
+		region.dx = info->var.xoffset;
+		region.dy = info->var.yoffset;
+                region.height = info->var.yres;
                 region.width = bh;
 		info->fbops->fb_fillrect(info, &region);
 	}
 }
 
-static void ccw_cursor(struct vc_data *vc, struct fb_info *info, int mode,
-		       int softback_lines, int fg, int bg)
+static void cw_cursor(struct vc_data *vc, struct fb_info *info, int mode,
+		      int softback_lines, int fg, int bg)
 {
 	struct fb_cursor cursor;
 	struct fbcon_ops *ops = info->fbcon_par;
@@ -229,7 +212,7 @@ static void ccw_cursor(struct vc_data *vc, struct fb_info *info, int mode,
 	int attribute, use_sw = (vc->vc_cursor_type & 0x10);
 	int err = 1, dx, dy;
 	char *src;
-	u32 vyres = GETVYRES(ops->p->scrollmode, info);
+	u32 vxres = GETVXRES(ops->p->scrollmode, info);
 
 	if (!ops->fontbuffer)
 		return;
@@ -263,7 +246,7 @@ static void ccw_cursor(struct vc_data *vc, struct fb_info *info, int mode,
 			return;
 		kfree(ops->cursor_data);
 		ops->cursor_data = dst;
-		ccw_update_attr(dst, src, attribute, vc);
+		cw_update_attr(dst, src, attribute, vc);
 		src = dst;
 	}
 
@@ -283,8 +266,8 @@ static void ccw_cursor(struct vc_data *vc, struct fb_info *info, int mode,
 		cursor.set |= FB_CUR_SETSIZE;
 	}
 
-	dx = y * vc->vc_font.height;
-	dy = vyres - ((vc->vc_x + 1) * vc->vc_font.width);
+	dx = vxres - ((y * vc->vc_font.height) + vc->vc_font.height);
+	dy = vc->vc_x * vc->vc_font.width;
 
 	if (ops->cursor_state.image.dx != dx ||
 	    ops->cursor_state.image.dy != dy ||
@@ -353,7 +336,7 @@ static void ccw_cursor(struct vc_data *vc, struct fb_info *info, int mode,
 		while (size--)
 			tmp[i++] = 0xff;
 		memset(mask, 0, w * vc->vc_font.width);
-		rotate_ccw(tmp, mask, vc->vc_font.width, vc->vc_font.height);
+		rotate_cw(tmp, mask, vc->vc_font.width, vc->vc_font.height);
 		kfree(tmp);
 	}
 
@@ -391,16 +374,16 @@ static void ccw_cursor(struct vc_data *vc, struct fb_info *info, int mode,
 	ops->cursor_reset = 0;
 }
 
-static int ccw_update_start(struct fb_info *info)
+static int cw_update_start(struct fb_info *info)
 {
 	struct fbcon_ops *ops = info->fbcon_par;
-	u32 yoffset;
-	u32 vyres = GETVYRES(ops->p->scrollmode, info);
+	u32 vxres = GETVXRES(ops->p->scrollmode, info);
+	u32 xoffset;
 	int err;
 
-	yoffset = (vyres - info->var.yres) - ops->var.xoffset;
-	ops->var.xoffset = ops->var.yoffset;
-	ops->var.yoffset = yoffset;
+	xoffset = vxres - (info->var.xres + ops->var.yoffset);
+	ops->var.yoffset = ops->var.xoffset;
+	ops->var.xoffset = xoffset;
 	err = fb_pan_display(info, &ops->var);
 	ops->var.xoffset = info->var.xoffset;
 	ops->var.yoffset = info->var.yoffset;
@@ -408,13 +391,17 @@ static int ccw_update_start(struct fb_info *info)
 	return err;
 }
 
-void fbcon_rotate_ccw(struct fbcon_ops *ops)
+void fbcon_rotate_cw(struct fbcon_ops *ops)
 {
-	ops->bmove = ccw_bmove;
-	ops->clear = ccw_clear;
-	ops->putcs = ccw_putcs;
-	ops->clear_margins = ccw_clear_margins;
-	ops->cursor = ccw_cursor;
-	ops->update_start = ccw_update_start;
+	ops->bmove = cw_bmove;
+	ops->clear = cw_clear;
+	ops->putcs = cw_putcs;
+	ops->clear_margins = cw_clear_margins;
+	ops->cursor = cw_cursor;
+	ops->update_start = cw_update_start;
 }
-EXPORT_SYMBOL(fbcon_rotate_ccw);
+EXPORT_SYMBOL(fbcon_rotate_cw);
+
+MODULE_AUTHOR("Antonino Daplas <adaplas@pol.net>");
+MODULE_DESCRIPTION("Console Rotation (90 degrees) Support");
+MODULE_LICENSE("GPL");
