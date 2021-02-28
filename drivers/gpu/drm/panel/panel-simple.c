@@ -373,7 +373,7 @@ static void panel_simple_parse_panel_timing_node(struct device *dev,
 {
 	const struct panel_desc *desc = panel->desc;
 	struct videomode vm;
-	unsigned int i;
+	/* unsigned int i; */
 
 	if (WARN_ON(desc->num_modes)) {
 		dev_err(dev, "Reject override mode: panel has a fixed mode\n");
@@ -384,7 +384,7 @@ static void panel_simple_parse_panel_timing_node(struct device *dev,
 		return;
 	}
 
-	for (i = 0; i < panel->desc->num_timings; i++) {
+	/*for (i = 0; i < panel->desc->num_timings; i++) {
 		const struct display_timing *dt = &panel->desc->timings[i];
 
 		if (!PANEL_SIMPLE_BOUNDS_CHECK(ot, dt, hactive) ||
@@ -405,7 +405,13 @@ static void panel_simple_parse_panel_timing_node(struct device *dev,
 		panel->override_mode.type |= DRM_MODE_TYPE_DRIVER |
 					     DRM_MODE_TYPE_PREFERRED;
 		break;
-	}
+	}*/
+
+	/* Do not check the override mode against the fallback */
+	videomode_from_timing(ot, &vm);
+	drm_display_mode_from_videomode(&vm, &panel->override_mode);
+	panel->override_mode.type |= DRM_MODE_TYPE_DRIVER |
+		     	 	 	 DRM_MODE_TYPE_PREFERRED;
 
 	if (WARN_ON(!panel->override_mode.type))
 		dev_err(dev, "Reject override mode: No display_timing found\n");
@@ -511,6 +517,42 @@ static void panel_simple_shutdown(struct device *dev)
 	panel_simple_disable(&panel->base);
 	panel_simple_unprepare(&panel->base);
 }
+
+static const struct display_timing sx8m_fallback_timing = {
+	.pixelclock = { 65002600, 65002600, 65002600 },
+	.hactive = { 1024, 1024, 1024 },
+	.hfront_porch = { 24, 24, 24 },
+	.hback_porch = { 160, 160, 160 },
+	.hsync_len = { 136, 136, 136 },
+	.vactive = { 768, 768, 768 },
+	.vfront_porch = { 3, 3, 3 },
+	.vback_porch = { 29, 29, 29 },
+	.vsync_len = { 6, 6, 6 },
+	.flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
+		DISPLAY_FLAGS_DE_LOW
+};
+
+static const struct panel_desc cgt_sx8m_lvds_panel = {
+	.timings = &sx8m_fallback_timing,
+	.num_timings = 1,
+	.bpc = 8,
+	.size = {
+		.width = 1024,
+		.height = 768,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
+};
+
+static const struct panel_desc cgt_sx8m_dp_display = {
+	.timings = &sx8m_fallback_timing,
+	.num_timings = 1,
+	.bpc = 8,
+	.size = {
+		.width = 1024,
+		.height = 768,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
+};
 
 static const struct drm_display_mode ampire_am_480272h3tmqw_t01h_mode = {
 	.clock = 9000,
@@ -3146,6 +3188,12 @@ static const struct panel_desc arm_rtsm = {
 
 static const struct of_device_id platform_of_match[] = {
 	{
+		.compatible = "cgt,sx8m-lvds",
+		.data = &cgt_sx8m_lvds_panel,
+	}, {
+		.compatible = "cgt,sx8m-dp",
+		.data = &cgt_sx8m_dp_display,
+	}, {
 		.compatible = "ampire,am-480272h3tmqw-t01h",
 		.data = &ampire_am_480272h3tmqw_t01h,
 	}, {

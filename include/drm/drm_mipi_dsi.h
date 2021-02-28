@@ -183,6 +183,7 @@ struct mipi_dsi_device {
 	unsigned long mode_flags;
 	unsigned long hs_rate;
 	unsigned long lp_rate;
+	unsigned int * export_dsi_freq;
 };
 
 #define MIPI_DSI_MODULE_PREFIX "mipi-dsi:"

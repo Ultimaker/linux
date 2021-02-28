@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Copyright 2019 NXP
+ */
+
+/dts-v1/;
+
+#include "imx8mm-cgtsx8m.dts"
+
+/ {
+	dpdisplay {
+		status = "okay";
+		/delete-property/ use-uboot-settings;
+
+		panel-timing {
+			clock-frequency = <110011001>;
+			hactive = <1280>;
+			vactive = <1024>;
+			hsync-len = <184>;
+			hfront-porch = <48>;
+			hback-porch = <200>;
+			vsync-len = <3>;
+			vfront-porch = <1>;
+			vback-porch = <26>;
+		};
+	};
+};
+
+&i2c4 {
+	dp-bridge@2d {
+		status = "okay";
+		hpd-enable;
+	};
+};

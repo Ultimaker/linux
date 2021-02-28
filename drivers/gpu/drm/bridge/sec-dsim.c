@@ -208,9 +208,9 @@
 #define PLLCTRL_DPDNSWAP_DAT		BIT(24)
 #define PLLCTRL_PLLEN			BIT(23)
 #define PLLCTRL_SET_PMS(x)		REG_PUT(x, 19,  1)
-   #define PLLCTRL_SET_P(x)		REG_PUT(x, 18, 13)
-   #define PLLCTRL_SET_M(x)		REG_PUT(x, 12,  3)
-   #define PLLCTRL_SET_S(x)		REG_PUT(x,  2,  0)
+   #define PLLCTRL_SET_P(x)		REG_PUT(x, 15, 13)
+   #define PLLCTRL_SET_M(x)		REG_PUT(x, 12,  4)
+   #define PLLCTRL_SET_S(x)		REG_PUT(x,  3,  0)
 
 #define PHYTIMING_SET_M_TLPXCTL(x)	REG_PUT(x, 15,  8)
 #define PHYTIMING_SET_M_THSEXITCTL(x)	REG_PUT(x,  7,  0)
@@ -286,6 +286,16 @@ struct dsim_hblank_par {
 	int lanes;
 };
 
+struct pms {
+  unsigned int p;
+  unsigned int m;
+  unsigned int s;
+  unsigned int pms;
+  unsigned int dsifreq;
+  unsigned int sndiv;
+  unsigned int difference;
+};
+
 struct dsim_pll_pms {
 	uint32_t bit_clk;	/* kHz */
 	uint32_t p;
@@ -320,6 +330,7 @@ struct sec_mipi_dsim {
 	enum mipi_dsi_pixel_format format;
 	unsigned long mode_flags;
 	const struct dsim_hblank_par *hpar;
+	unsigned int * export_dsi_freq;
 	unsigned int pms;
 	unsigned int p;
 	unsigned int m;
@@ -542,6 +553,7 @@ static int sec_mipi_dsim_host_attach(struct mipi_dsi_host *host,
 	dsim->channel	 = dsi->channel;
 	dsim->format	 = dsi->format;
 	dsim->mode_flags = dsi->mode_flags;
+	dsim->export_dsi_freq = dsi->export_dsi_freq;
 
 	/* TODO: support later */
 #if 0
@@ -1281,7 +1293,7 @@ struct dsim_pll_pms *sec_mipi_dsim_calc_pmsk(struct sec_mipi_dsim *dsim)
 	return pll_pms;
 }
 
-int sec_mipi_dsim_check_pll_out(void *driver_private,
+static int sec_mipi_dsim_check_pll_out_orig(void *driver_private,
 				const struct drm_display_mode *mode)
 {
 	int bpp;
@@ -1335,6 +1347,137 @@ int sec_mipi_dsim_check_pll_out(void *driver_private,
 	}
 
 	return 0;
+}
+
+static int sec_mipi_dsim_check_pll_out_snbridge(void *driver_private,
+				const struct drm_display_mode *mode)
+{
+	int bpp;
+	struct sec_mipi_dsim *dsim = driver_private;
+	const struct sec_mipi_dsim_plat_data *pdata = dsim->pdata;
+	const struct dsim_hblank_par *hpar;
+
+    struct pms combFound = { 0, 0, 0, 0, 0, 0 };
+    struct pms zeroBackup = { 0, 0, 0, 0, 0, 0 };
+    uint64_t pmstability, pstability;
+    uint64_t freq, bit_freq, pix_freq;
+    unsigned int inFreq = PHY_REF_CLK * 1000;
+    unsigned int p, m, s, sndiv, pixdiv;
+    int current_difference;
+
+    if ( dsim->export_dsi_freq && *dsim->export_dsi_freq )
+    	return 0; /* frequency already set and exported; no need for recalculation */
+
+    bpp = mipi_dsi_pixel_format_to_bpp(dsim->format);
+    if (bpp < 0)
+    	return -EINVAL;
+
+    pixdiv = DIV_ROUND_CLOSEST(594000, mode->clock);
+    pix_freq = 594000000 / pixdiv;
+    bit_freq = DIV_ROUND_UP(pix_freq * bpp, dsim->lanes * 2);
+
+	if (bit_freq > pdata->max_data_rate) {
+		dev_err(dsim->dev,
+			"reuested bit clk freq exceeds lane's maximum value\n");
+		return -EINVAL;
+	}
+
+	for (s=0;s<=1;s++)
+		for (p=1;p<33;p++)
+			for (m=25;m<=125;m++)
+			{
+				pmstability = ( inFreq * m ) / p;
+				pstability = inFreq / p;
+				freq = ( inFreq * m ) / ( p * ( 1 << s ) );
+
+				if ( ( pmstability >= 350000000 ) && ( pmstability <= 750000000 ) &&
+						( pstability >= 6000000 ) && ( pstability <= 12000000 ) &&
+						( ( freq >= ( bit_freq ) ) && ( freq <= 600000000 ) )
+				)
+				{
+					/* encapsulating the requirement 2^x into the cycle */
+					for (sndiv=16; ( freq / sndiv ) < pix_freq; sndiv>>=1)
+						;
+
+					current_difference = ( freq / sndiv ) - pix_freq;
+
+					if ( current_difference == 0 )
+					{
+						zeroBackup.p = p;
+						zeroBackup.m = m;
+						zeroBackup.s = s;
+						zeroBackup.pms = (zeroBackup.s) | (zeroBackup.m << 4) | (zeroBackup.p << 13);
+						zeroBackup.dsifreq = freq;
+						zeroBackup.sndiv = sndiv;
+						zeroBackup.difference = current_difference;
+					}
+
+					if ( ( ( current_difference > 0 ) && ( current_difference < 5000000 ) ) &&
+							( ( combFound.p == 0 )  ||
+									( ( ( combFound.difference > current_difference ) &&
+											( sndiv >= combFound.sndiv )
+									)
+									)
+							)
+					)
+					{
+						combFound.p = p;
+						combFound.m = m;
+						combFound.s = s;
+						combFound.pms = (combFound.s) | (combFound.m << 4) | (combFound.p << 13);
+						combFound.dsifreq = freq;
+						combFound.sndiv = sndiv;
+						combFound.difference = current_difference;
+					}
+				}
+			}
+
+	if ( combFound.p == 0 )
+		combFound = zeroBackup;
+
+	if (combFound.p == 0) {
+		dev_err(dsim->dev,
+			"failed to get pmsk for: fin = %u, fout = %llu\n",
+			dsim->pref_clk, bit_freq / 1000);
+		return -EINVAL;
+	}
+
+	dsim->pix_clk = pix_freq / 1000;
+	dsim->bit_clk = combFound.dsifreq / 1000;
+	dsim->hpar = NULL;
+
+	dsim->p = combFound.p;
+	dsim->m = combFound.m;
+	dsim->s = combFound.s;
+	dsim->pms = combFound.pms;
+
+	if (dsim->export_dsi_freq)
+		*dsim->export_dsi_freq = dsim->bit_clk;
+
+	if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO_SYNC_PULSE) {
+		hpar = sec_mipi_dsim_get_hblank_par(mode->name,
+						    mode->vrefresh,
+						    dsim->lanes);
+		dsim->hpar = hpar;
+		if (!hpar)
+			dev_dbg(dsim->dev, "no pre-exist hpar can be used\n");
+	}
+
+	return 0;
+}
+
+int sec_mipi_dsim_check_pll_out(void *driver_private,
+				const struct drm_display_mode *mode)
+{
+	int ret;
+	struct sec_mipi_dsim *dsim = driver_private;
+
+	if (dsim->export_dsi_freq)
+		ret = sec_mipi_dsim_check_pll_out_snbridge(driver_private, mode);
+	else
+		ret = sec_mipi_dsim_check_pll_out_orig(driver_private, mode);
+
+	return ret;
 }
 EXPORT_SYMBOL(sec_mipi_dsim_check_pll_out);
 

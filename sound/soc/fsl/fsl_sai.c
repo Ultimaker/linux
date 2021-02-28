@@ -541,7 +541,7 @@ static int fsl_sai_set_bclk(struct snd_soc_dai *dai, bool tx, u32 freq)
 		 * Drop the source that can not be
 		 * divided into the required rate.
 		 */
-		if (ret != 0 && clk_rate / ret < 1000)
+		if (ret != 0 && clk_rate / ret > 1000)
 			continue;
 
 		dev_dbg(dai->dev,
