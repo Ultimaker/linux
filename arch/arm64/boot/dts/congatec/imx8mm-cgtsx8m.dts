@@ -465,10 +465,10 @@
 
 &ecspi2 {
         num-cs = <1>;
-	cs-gpios = <&gpio5 13 0>;
+	cs-gpios = <&gpio5 13 GPIO_ACTIVE_LOW>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_ecspi2>;
-	status = "disabled";
+	status = "okay";
 
 	flash1: w25q64fw@0 {
 		reg = <0>;
@@ -842,7 +842,7 @@
 			MX8MM_IOMUXC_ECSPI2_SCLK_ECSPI2_SCLK		0x1c2
 			MX8MM_IOMUXC_ECSPI2_MISO_ECSPI2_MISO		0x82
 			MX8MM_IOMUXC_ECSPI2_MOSI_ECSPI2_MOSI		0x82
-			MX8MM_IOMUXC_ECSPI2_SS0_GPIO5_IO13		0x82
+			MX8MM_IOMUXC_ECSPI2_SS0_GPIO5_IO13		0x82  /* Chip Select, no pull up/down */
 		>;
 	};
 

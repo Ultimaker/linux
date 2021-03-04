@@ -28,6 +28,16 @@
 
 #define DRIVER_NAME "spi_imx"
 
+/* CGT SX8M: Congatec Sx8m boards (by Robert Pasz)
+ *
+ * Congatec configuration uses external flash memory on ecspi2
+ * GPIO and DMA controllers are unfortunately initialized later than this
+ * interface.
+ * This two hooks overcome this issue.
+ *  */
+#define CGT_USE_GPIOD 1
+#define CGT_DMA_FIX 1
+
 static bool use_dma = true;
 module_param(use_dma, bool, 0644);
 MODULE_PARM_DESC(use_dma, "Enable usage of DMA when available (default)");
@@ -110,6 +120,9 @@ struct spi_imx_data {
 
 	/* DMA */
 	bool usedma;
+#ifdef CGT_DMA_FIX
+	bool dma_HW_ready;
+#endif
 	u32 wml;
 	struct completion dma_rx_completion;
 	struct completion dma_tx_completion;
@@ -228,6 +241,11 @@ static bool spi_imx_can_dma(struct spi_master *master, struct spi_device *spi,
 	if (!use_dma)
 		return false;
 
+#ifdef CGT_DMA_FIX
+	if (!spi_imx->dma_HW_ready)
+		return false;
+#endif
+
 	if (!master->dma_rx)
 		return false;
 
@@ -241,6 +259,24 @@ static bool spi_imx_can_dma(struct spi_master *master, struct spi_device *spi,
 
 	return true;
 }
+
+#ifdef CGT_DMA_FIX
+	bool sdma_is_ready(struct dma_chan *chan);
+
+static bool spi_imx_can_dma_xfer(struct spi_master *master, struct spi_device *spi,
+			 struct spi_transfer *transfer)
+{
+	struct spi_imx_data *spi_imx = spi_master_get_devdata(master);
+
+	if (sdma_is_ready(spi_imx->bitbang.master->dma_tx) &&
+		sdma_is_ready(spi_imx->bitbang.master->dma_rx))
+		spi_imx->dma_HW_ready = 1;
+	else
+		spi_imx->dma_HW_ready = 0;
+
+	return spi_imx_can_dma(master, spi, transfer);
+}
+#endif //CGT_DMA_FIX
 
 #define MX51_ECSPI_CTRL		0x08
 #define MX51_ECSPI_CTRL_ENABLE		(1 <<  0)
@@ -738,7 +774,11 @@ static int mx31_prepare_transfer(struct spi_imx_data *spi_imx,
 		reg |= MX31_CSPICTRL_POL;
 	if (spi->mode & SPI_CS_HIGH)
 		reg |= MX31_CSPICTRL_SSPOL;
+#ifndef CGT_USE_GPIOD
 	if (!gpio_is_valid(spi->cs_gpio))
+#else
+	if (!spi->cs_gpiod)
+#endif
 		reg |= (spi->chip_select) <<
 			(is_imx35_cspi(spi_imx) ? MX35_CSPICTRL_CS_SHIFT :
 						  MX31_CSPICTRL_CS_SHIFT);
@@ -839,7 +879,11 @@ static int mx21_prepare_transfer(struct spi_imx_data *spi_imx,
 		reg |= MX21_CSPICTRL_POL;
 	if (spi->mode & SPI_CS_HIGH)
 		reg |= MX21_CSPICTRL_SSPOL;
+#ifndef CGT_USE_GPIOD
 	if (!gpio_is_valid(spi->cs_gpio))
+#else
+	if (!spi->cs_gpiod)
+#endif
 		reg |= spi->chip_select << MX21_CSPICTRL_CS_SHIFT;
 
 	writel(reg, spi_imx->base + MXC_CSPICTRL);
@@ -1010,7 +1054,8 @@ static struct spi_imx_devtype_data imx51_ecspi_devtype_data = {
 	.setup_wml = mx51_setup_wml,
 	.fifo_size = 64,
 	.has_dmamode = true,
-	.dynamic_burst = true,
+	//.dynamic_burst = true,
+	.dynamic_burst = false,
 	.has_slavemode = true,
 	.disable = mx51_ecspi_disable,
 	.devtype = IMX51_ECSPI,
@@ -1091,16 +1136,25 @@ MODULE_DEVICE_TABLE(of, spi_imx_dt_ids);
 
 static void spi_imx_chipselect(struct spi_device *spi, int is_active)
 {
+#ifndef	CGT_USE_GPIOD
 	int active = is_active != BITBANG_CS_INACTIVE;
 	int dev_is_lowactive = !(spi->mode & SPI_CS_HIGH);
+#endif
 
 	if (spi->mode & SPI_NO_CS)
+	return;
+
+#ifdef	CGT_USE_GPIOD
+	if (!spi->cs_gpiod)
 		return;
 
+	gpiod_set_value(spi->cs_gpiod, !is_active);
+#else 
 	if (!gpio_is_valid(spi->cs_gpio))
 		return;
 
 	gpio_set_value(spi->cs_gpio, dev_is_lowactive ^ active);
+#endif
 }
 
 static void spi_imx_set_burst_len(struct spi_imx_data *spi_imx, int n_bits)
@@ -1328,7 +1382,12 @@ static int spi_imx_sdma_init(struct device *dev, struct spi_imx_data *spi_imx,
 
 	init_completion(&spi_imx->dma_rx_completion);
 	init_completion(&spi_imx->dma_tx_completion);
+
+#ifdef CGT_DMA_FIX
+	master->can_dma = spi_imx_can_dma_xfer;
+#else
 	master->can_dma = spi_imx_can_dma;
+#endif
 	master->max_dma_len = MAX_SDMA_BD_BYTES;
 	spi_imx->bitbang.master->flags = SPI_MASTER_MUST_RX |
 					 SPI_MASTER_MUST_TX;
@@ -1559,10 +1618,15 @@ static int spi_imx_setup(struct spi_device *spi)
 	if (spi->mode & SPI_NO_CS)
 		return 0;
 
+#ifndef CGT_USE_GPIOD
 	if (gpio_is_valid(spi->cs_gpio))
 		gpio_direction_output(spi->cs_gpio,
 				      spi->mode & SPI_CS_HIGH ? 0 : 1);
-
+#else
+	/* may be not necessary */
+	if (spi->cs_gpiod)
+		gpiod_direction_output(spi->cs_gpiod, 0);
+#endif
 	spi_imx_chipselect(spi, BITBANG_CS_INACTIVE);
 
 	return 0;
@@ -1631,7 +1695,20 @@ static int spi_imx_probe(struct platform_device *pdev)
 	const struct spi_imx_devtype_data *devtype_data = of_id ? of_id->data :
 		(struct spi_imx_devtype_data *)pdev->id_entry->driver_data;
 	bool slave_mode;
-
+#if 0
+	static int firstrun = 1;
+	static unsigned long timer_start = 0;
+	if (firstrun == 1)
+	{
+		firstrun = 0;
+		timer_start = jiffies;
+	}
+	if (jiffies < (timer_start + (HZ/2)))
+	{
+		printk(KERN_ERR "deferring\n");
+		return -EPROBE_DEFER;
+	}
+#endif
 	if (!np && !mxc_platform_info) {
 		dev_err(&pdev->dev, "can't get the platform data\n");
 		return -EINVAL;
@@ -1695,8 +1772,12 @@ static int spi_imx_probe(struct platform_device *pdev)
 	spi_imx->bitbang.master->prepare_message = spi_imx_prepare_message;
 	spi_imx->bitbang.master->unprepare_message = spi_imx_unprepare_message;
 	spi_imx->bitbang.master->slave_abort = spi_imx_slave_abort;
+#ifdef CGT_USE_GPIOD
 	spi_imx->bitbang.master->mode_bits = SPI_CPOL | SPI_CPHA | SPI_CS_HIGH \
 					     | SPI_NO_CS;
+#else
+	spi_imx->bitbang.master->mode_bits = SPI_CPOL | SPI_CPHA | SPI_CS_HIGH;
+#endif
 	if (is_imx35_cspi(spi_imx) || is_imx51_ecspi(spi_imx) ||
 	    is_imx53_ecspi(spi_imx))
 		spi_imx->bitbang.master->mode_bits |= SPI_LOOP | SPI_READY;
@@ -1765,6 +1846,10 @@ static int spi_imx_probe(struct platform_device *pdev)
 
 	spi_imx->devtype_data->intctrl(spi_imx, 0);
 
+#ifdef CGT_USE_GPIOD
+	spi_imx->bitbang.master->use_gpio_descriptors = true;
+#endif
+
 	master->dev.of_node = pdev->dev.of_node;
 	ret = spi_bitbang_start(&spi_imx->bitbang);
 	if (ret) {
@@ -1772,6 +1857,7 @@ static int spi_imx_probe(struct platform_device *pdev)
 		goto out_clk_put;
 	}
 
+#ifndef CGT_USE_GPIOD
 	/* Request GPIO CS lines, if any */
 	if (!spi_imx->slave_mode && master->cs_gpios) {
 		for (i = 0; i < master->num_chipselect; i++) {
@@ -1793,6 +1879,7 @@ static int spi_imx_probe(struct platform_device *pdev)
 			}
 		}
 	}
+#endif /* NEW_CS_PINS */
 
 	dev_info(&pdev->dev, "probed\n");
 
@@ -1800,8 +1887,10 @@ static int spi_imx_probe(struct platform_device *pdev)
 	clk_disable_unprepare(spi_imx->clk_per);
 	return ret;
 
+#ifndef CGT_USE_GPIOD
 out_spi_bitbang:
 	spi_bitbang_stop(&spi_imx->bitbang);
+#endif
 out_clk_put:
 	clk_disable_unprepare(spi_imx->clk_ipg);
 out_put_per:

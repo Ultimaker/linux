@@ -47,6 +47,9 @@
 #include "dmaengine.h"
 #include "virt-dma.h"
 
+/* Congatec hook for ecspi driver spi/spi-imx.c */
+#define CGT_DMA_FIX 1
+
 /* SDMA registers */
 #define SDMA_H_C0PTR		0x000
 #define SDMA_H_INTR		0x004
@@ -2172,6 +2175,21 @@ out:
 
 	return ret;
 }
+
+#ifdef CGT_DMA_FIX
+bool sdma_is_ready(struct dma_chan *chan)
+{
+	struct sdma_channel *sdmac = to_sdma_chan(chan);
+
+	if (!sdmac || !sdmac->sdma->fw_loaded /* && sdmac->is_ram_script*/) {
+		dev_dbg(sdmac->sdma->dev, "sdma firmware not ready yet!\n");
+		return false;
+	} else {
+		dev_dbg(sdmac->sdma->dev, "sdma firmware is ready!\n");
+		return true;
+	}
+}
+#endif
 
 static int sdma_get_firmware(struct sdma_engine *sdma,
 		const char *fw_name)
