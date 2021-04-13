@@ -1,0 +1,151 @@
+/*
+ * Copyright 2017 NXP
+ * Copyright 2021 congatec AG
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/dts-v1/;
+
+#include "imx8qm-cgtsmx8.dtsi"
+
+/ {
+	dp_refclk: dp-refclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <27000000>;
+	};
+
+	dp_display: dp-display {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "cgt,panel-1024x768", "simple-panel";
+		power-supply = <&reg_vdd_3v3>;
+		status = "okay";
+
+		port@0 {
+			reg = <0>;
+
+			dp_display_in: endpoint {
+				remote-endpoint = <&dp_bridge_out>;
+			};
+		};
+	};
+};
+
+
+/* i2c bus to MIPI-DSI to eDP bridge */
+&i2c0_mipi1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_mipi1_lpi2c0>;
+	clock-frequency = <100000>;
+	status = "okay";
+
+	dpbridge: sn65dsi86@2d {
+		compatible = "ti,sn65dsi86";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x2d>;
+		clock-names = "refclk";
+		clocks = <&dp_refclk>;
+		interrupt-parent = <&lsio_gpio1>;
+		interrupts = <18 IRQ_TYPE_LEVEL_HIGH>;
+
+		enable-gpios = <&lsio_gpio1 23 GPIO_ACTIVE_HIGH>;
+
+		vccio-supply = <&reg_vdd_1v8>;
+		vpll-supply = <&reg_vdd_1v8>;
+		vcca-supply = <&reg_vdd_1v2>;
+		vcc-supply = <&reg_vdd_1v2>;
+
+		ddc-edid-enable;
+		edp-assr;
+
+		/* hotplug detect is not avail due to a hardware issue on SMX8 */
+		// hpd-enable;
+
+		status = "okay";
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				dp_bridge_in: endpoint {
+					remote-endpoint = <&dsim_to_dp_bridge>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				dp_bridge_out: endpoint {
+					remote-endpoint = <&dp_display_in>;
+				};
+			};
+		};
+	};
+};
+
+&mipi1_dphy {
+	status = "okay";
+};
+
+&mipi1_dsi_host {
+	status = "okay";
+
+	ports {
+		port@1 {
+			reg = <1>;
+			dsim_to_dp_bridge: endpoint {
+				remote-endpoint = <&dp_bridge_in>;
+			};
+		};
+	};
+};
+
+&irqsteer_mipi1 {
+	status = "okay";
+};
+
+&ldb1_phy {
+	status = "disabled";
+};
+
+&ldb1 {
+	status = "disabled";
+};
+
+&ldb2_phy {
+	status = "disabled";
+};
+
+&ldb2 {
+	status = "disabled";
+};
+
+
+&iomuxc {
+	pinctrl_mipi1_lpi2c0: mipi1_lpi2c0grp {
+		fsl,pins = <
+			IMX8QM_MIPI_DSI1_I2C0_SCL_MIPI_DSI1_I2C0_SCL      0xc600004c
+			IMX8QM_MIPI_DSI1_I2C0_SDA_MIPI_DSI1_I2C0_SDA      0xc600004c
+			IMX8QM_MIPI_DSI0_GPIO0_00_LSIO_GPIO1_IO18         0x00000041 /* pulldown on SN65DSI86 IRQ request (if stuffed) or SMARC S113 eDP1_HDP */
+			IMX8QM_MIPI_DSI0_GPIO0_01_LSIO_GPIO1_IO19         0x00000041 /* not used, pull down */
+			IMX8QM_MIPI_DSI1_GPIO0_00_LSIO_GPIO1_IO22         0x00000041 /* SMARC S144 eDP0_HDP, pull down */
+			IMX8QM_MIPI_DSI1_GPIO0_01_LSIO_GPIO1_IO23         0x00000020 /* DSI to eDP Bridge (U37) Reset Pin, pull up */
+		>;
+	};
+};
