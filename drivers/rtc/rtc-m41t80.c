@@ -931,6 +931,17 @@ static int m41t80_probe(struct i2c_client *client,
 		m41t80_data->rtc->uie_unsupported = 1;
 	}
 
+	/* Clear the OF (Oscillator failure) bit, which is 1 on power up */
+	rc = i2c_smbus_read_byte_data(client, M41T80_REG_FLAGS);
+	if (rc < 0) {
+		dev_warn(&client->dev, "unable to read flags");
+	} else if (rc & M41T80_FLAGS_OF) {
+		rc &= ~M41T80_FLAGS_OF;
+		rc = i2c_smbus_write_byte_data(client, M41T80_REG_FLAGS, rc);
+		if (rc)
+		dev_warn(&client->dev, "unable to clear OF flag");
+	}
+
 	/* Make sure HT (Halt Update) bit is cleared */
 	rc = i2c_smbus_read_byte_data(client, M41T80_REG_ALARM_HOUR);
 
