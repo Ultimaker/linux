@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Copyright 2018 NXP
+ *	Dong Aisheng <aisheng.dong@nxp.com>
+ * Copyright 2021 congatec GmbH
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/dts-v1/;
+
+#include "imx8qm-cgtsmx8.dtsi"
+
+
+/* 1024 x 768 Display on LVDS output 0 on SEVA backplane */
+/* with backlight and power enable pin declaration */
+/ {
+	lvds0_panel: lvds0-panel {
+		compatible = "panel-lvds";
+		backlight = <&lvds_backlight0>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_lvds0_vdd_en>;
+		enable-gpios = <&lsio_gpio1 06 GPIO_ACTIVE_HIGH>; /* LCD0_VDD_EN: SMARC S133 */
+
+		data-mapping = "vesa-24";
+		width-mm = <250>;
+		height-mm = <185>;
+
+		panel-timing {
+			clock-frequency = <65000000>;
+			hactive = <1024>;
+			vactive = <768>;
+			hfront-porch = <40>;
+			hsync-len = <60>;
+			hback-porch = <220>;
+			vfront-porch = <7>;
+			vsync-len = <10>;
+			vback-porch = <21>;
+		};
+
+		port {
+			lvds0_panel_in: endpoint {
+				remote-endpoint = <&lvds0_out>;
+			};
+		};
+	};
+
+	/* LCD0_BKLT_PWM: SMARC S142 */
+	lvds_backlight0: lvds_backlight@0 {
+		compatible = "pwm-backlight";
+		pwms = <&pwm_lvds0 0 100000 0>;
+
+		brightness-levels = < 0  1  2  3  4  5  6  7  8  9
+				     10 11 12 13 14 15 16 17 18 19
+				     20 21 22 23 24 25 26 27 28 29
+				     30 31 32 33 34 35 36 37 38 39
+				     40 41 42 43 44 45 46 47 48 49
+				     50 51 52 53 54 55 56 57 58 59
+				     60 61 62 63 64 65 66 67 68 69
+				     70 71 72 73 74 75 76 77 78 79
+				     80 81 82 83 84 85 86 87 88 89
+				     90 91 92 93 94 95 96 97 98 99
+				    100>;
+		default-brightness-level = <80>;
+		power-supply = <&reg_lvds0_backlight_en>;
+	};
+
+	/* LCD0_BKLT_EN: SMARC S127 */
+	/* use a fixed regulator to switch on EN pin */
+	reg_lvds0_backlight_en: lvds0_backlight_en {
+		compatible = "regulator-fixed";
+		regulator-name = "LVDS0_BACKLIGHT_EN";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_lvds0_backlight_en>;
+		gpio = <&lsio_gpio1 07 GPIO_ACTIVE_HIGH>;
+		off-on-delay-us = <12000>;
+		enable-active-high;
+		// regulator-always-on;
+	};
+};
+
+&ldb1_phy {
+	status = "okay";
+};
+
+&ldb1 {
+	status = "okay";
+
+	lvds-channel@0 {
+		status = "okay";
+
+		port@1 {
+			reg = <1>;
+
+			/* connect output port of lvds display bridge to a lcd panel */
+			lvds0_out: endpoint {
+				remote-endpoint = <&lvds0_panel_in>;
+			};
+		};
+	};
+};
+
+&pwm_lvds0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pwm_lvds0>;
+	status = "okay";
+};
+
+
+/* /dev/i2c-5 */
+/* SEVA: LVDS connector X23 p1/p2: i2c-EEPROM: 0x50..0x57 */
+/* SEVA: U28: EDID EEPROM (not equipped) */
+&i2c1_lvds0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lvds0_lpi2c1>;
+	clock-frequency = <100000>;
+	status = "okay";
+
+	// i2c eeprom on panel/lvds connector (if avail)
+	eeprom@50 {
+		compatible = "atmel,24c256";
+		reg = <0x50>;
+		pagesize = <64>;
+		status = "disabled";
+	};
+};
+
+
+

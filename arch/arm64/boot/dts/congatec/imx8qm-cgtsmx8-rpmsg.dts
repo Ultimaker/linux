@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: GPL-2.0+
+// Copyright NXP 2019
+
+#include "imx8qm-cgtsmx8.dts"
+
+/delete-node/ &cm41_i2c;
+
+&i2c_rpbus_1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+};
+
+&cm41_i2c_lpcg {
+	status = "disabled";
+};
+
+&cm41_intmux {
+	status = "disabled";
+};
+
+&can0_lpcg {
+	status = "disabled";
+};
+
+&can1_lpcg {
+	status = "disabled";
+};
+
+&can2_lpcg {
+	status = "disabled";
+};
+
+&flexcan1 {
+	status = "disabled";
+};
+
+&flexcan2 {
+	status = "disabled";
+};
+
+&flexcan3 {
+	status = "disabled";
+};
+
+&flexspi0 {
+	status = "disabled";
+};
+
+&lpuart2 {
+	status = "disabled";
+};
+
+&uart2_lpcg {
+	status = "disabled";
+};
+
+&imx8qm_cm40 {
+	/* Assume you have partitioned M4, so M4 is ont controled by Linux */
+	/delete-property/ power-domains;
+};
+
+&imx8qm_cm41 {
+	/* Assume you have partitioned M4, so M4 is ont controled by Linux */
+	/delete-property/ power-domains;
+};

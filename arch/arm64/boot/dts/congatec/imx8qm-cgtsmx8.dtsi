@@ -1,0 +1,1644 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Copyright 2018 NXP
+ *	Dong Aisheng <aisheng.dong@nxp.com>
+ * Copyright 2021 congatec GmbH
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/dts-v1/;
+
+// #include <dt-bindings/usb/pd.h>
+#include "../freescale/imx8qm.dtsi"
+
+/ {
+	model = "congatec SMX8";
+	compatible = "fsl,imx8qm-smx8", "fsl,imx8qm";
+
+	chosen {
+		bootargs = "console=ttyLP0,115200 earlycon=lpuart32,0x5a060000,115200";
+		stdout-path = &lpuart0;
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x00000000 0x80000000 0 0x40000000>;
+	};
+
+	resmem: reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		gpu_reserved: gpu_reserved@0x8800000000 {
+			no-map;
+			reg = <0x8 0x80000000 0 0x10000000>;
+		};
+
+		decoder_boot: decoder_boot@0x84000000 {
+			no-map;
+			reg = <0 0x84000000 0 0x2000000>;
+		};
+		encoder_boot: encoder_boot@0x86000000 {
+			no-map;
+			reg = <0 0x86000000 0 0x400000>;
+		};
+		/*
+		 * reserved-memory layout
+		 * 0x8800_0000 ~ 0x8FFF_FFFF is reserved for M4
+		 * Shouldn't be used at A core and Linux side.
+		 *
+		 */
+		m4_reserved: m4@0x88000000 {
+			no-map;
+			reg = <0 0x88000000 0 0x8000000>;
+		};
+		rpmsg_reserved: rpmsg@0x90000000 {
+			no-map;
+			reg = <0 0x90200000 0 0x200000>;
+		};
+		decoder_rpc: decoder_rpc@0x92000000 {
+			no-map;
+			reg = <0 0x92000000 0 0x200000>;
+		};
+		encoder_rpc: encoder_rpc@0x92200000 {
+			no-map;
+			reg = <0 0x92200000 0 0x200000>;
+		};
+		dsp_reserved: dsp@0x92400000 {
+			no-map;
+			reg = <0 0x92400000 0 0x2000000>;
+		};
+		encoder_reserved: encoder_reserved@0x94400000 {
+			no-map;
+			reg = <0 0x94400000 0 0x800000>;
+		};
+		ts_boot: ts_boot@0x95000000 {
+			no-map;
+			reg = <0 0x95000000 0 0x400000>;
+		};
+
+		/* global autoconfigured region for contiguous allocations */
+		linux,cma {
+			compatible = "shared-dma-pool";
+			reusable;
+			size = <0 0x3c000000>;
+			alloc-ranges = <0 0x96000000 0 0x3c000000>;
+			linux,cma-default;
+		};
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		vdev0vring0: vdev0vring0@90000000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x90000000 0 0x8000>;
+			no-map;
+		};
+
+		vdev0vring1: vdev0vring1@90008000 {
+                        compatible = "shared-dma-pool";
+			reg = <0 0x90008000 0 0x8000>;
+			no-map;
+		};
+
+		vdev1vring0: vdev1vring0@90010000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x90010000 0 0x8000>;
+			no-map;
+		};
+
+		vdev1vring1: vdev1vring1@90018000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x90018000 0 0x8000>;
+			no-map;
+		};
+
+		rsc-table@0 {
+			reg = <0 0x900ff000 0 0x1000>;
+			no-map;
+		};
+
+		vdevbuffer: vdevbuffer {
+			compatible = "shared-dma-pool";
+			reg = <0 0x90400000 0 0x100000>;
+			no-map;
+		};
+
+		vdev2vring0: vdev0vring0@90100000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x90100000 0 0x8000>;
+			no-map;
+		};
+
+		vdev2vring1: vdev0vring1@90108000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x90108000 0 0x8000>;
+			no-map;
+		};
+
+		vdev3vring0: vdev1vring0@90110000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x90110000 0 0x8000>;
+			no-map;
+		};
+
+		vdev3vring1: vdev1vring1@90118000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x90118000 0 0x8000>;
+			no-map;
+		};
+
+		rsc-table@1 {
+			reg = <0 0x901ff000 0 0x1000>;
+			no-map;
+		};
+	};
+
+
+	/* fixed regulators for all components who need one */
+	reg_vdd_5v: vdd_5v {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	reg_vdd_3v3: vdd_3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	reg_vdd_1v8: vdd_1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_1v8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
+
+	reg_vdd_1v2: vdd_1v2 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_1v2";
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		regulator-always-on;
+	};
+
+	/* SMARC SDHC interface PWR_EN (SMARC P37) */
+	reg_usdhc2_vmmc: usdhc2-vmmc {
+		compatible = "regulator-fixed";
+		regulator-name = "SD1_SPWR";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&lsio_gpio4 7 GPIO_ACTIVE_HIGH>;
+		off-on-delay-us = <12000>;
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/* SMX8 onboard micro-SD card slot reset line */
+	reg_usdhc3_vmmc: usdhc3_vmmc {
+		compatible = "regulator-fixed";
+		regulator-name = "SD2_SPWR";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&lsio_gpio4 9 GPIO_ACTIVE_HIGH>;
+		off-on-delay = <12000>;
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	imx8qm_cm40: imx8qm_cm4@0 {
+		compatible = "fsl,imx8qm-cm4";
+		rsc-da = <0x90000000>;
+		mbox-names = "tx", "rx", "rxdb";
+		mboxes = <&lsio_mu5 0 1
+			  &lsio_mu5 1 1
+			  &lsio_mu5 3 1>;
+		mub-partition = <3>;
+		memory-region = <&vdev0vring0>, <&vdev0vring1>, <&vdevbuffer>,
+				<&vdev1vring0>, <&vdev1vring1>;
+		core-index = <0>;
+		core-id = <IMX_SC_R_M4_0_PID0>;
+		status = "okay";
+		power-domains = <&pd IMX_SC_R_M4_0_PID0>,
+				<&pd IMX_SC_R_M4_0_MU_1A>;
+	};
+
+
+	imx8qm_cm41: imx8qm_cm4@1 {
+		compatible = "fsl,imx8qm-cm4";
+		rsc-da = <0x90100000>;
+		mbox-names = "tx", "rx", "rxdb";
+		mboxes = <&lsio_mu6 0 1
+			  &lsio_mu6 1 1
+			  &lsio_mu6 3 1>;
+		mub-partition = <4>;
+		memory-region = <&vdev2vring0>, <&vdev2vring1>, <&vdevbuffer>,
+				<&vdev3vring0>, <&vdev3vring1>;
+		core-index = <1>;
+		core-id = <IMX_SC_R_M4_1_PID0>;
+		status = "okay";
+		power-domains = <&pd IMX_SC_R_M4_1_PID0>,
+				<&pd IMX_SC_R_M4_1_MU_1A>;
+	};
+
+};
+
+
+&cm40_intmux {
+	status = "okay";
+};
+
+&cm41_intmux {
+	status = "okay";
+};
+
+&rpmsg0{
+	/*
+	 * 64K for one rpmsg instance:
+	 */
+	vdev-nums = <2>;
+	reg = <0x0 0x90000000 0x0 0x20000>;
+	memory-region = <&vdevbuffer>;
+	status = "disabled";
+};
+
+&rpmsg1{
+	/*
+	 * 64K for one rpmsg instance:
+	 */
+	vdev-nums = <2>;
+	reg = <0x0 0x90100000 0x0 0x20000>;
+	memory-region = <&vdevbuffer>;
+	status = "disabled";
+};
+
+
+/* ------------ Display Controller 0 ------------------- */
+&dc0_pc {
+	status = "okay";
+};
+
+&dc0_prg1 {
+	status = "okay";
+};
+
+&dc0_prg2 {
+	status = "okay";
+};
+
+&dc0_prg3 {
+	status = "okay";
+};
+
+&dc0_prg4 {
+	status = "okay";
+};
+
+&dc0_prg5 {
+	status = "okay";
+};
+
+&dc0_prg6 {
+	status = "okay";
+};
+
+&dc0_prg7 {
+	status = "okay";
+};
+
+&dc0_prg8 {
+	status = "okay";
+};
+
+&dc0_prg9 {
+	status = "okay";
+};
+
+&dc0_dpr1_channel1 {
+	status = "okay";
+};
+
+&dc0_dpr1_channel2 {
+	status = "okay";
+};
+
+&dc0_dpr1_channel3 {
+	status = "okay";
+};
+
+&dc0_dpr2_channel1 {
+	status = "okay";
+};
+
+&dc0_dpr2_channel2 {
+	status = "okay";
+};
+
+&dc0_dpr2_channel3 {
+	status = "okay";
+};
+
+&dpu1 {
+	status = "okay";
+};
+
+&ldb1_phy {
+	status = "disabled";
+};
+
+&ldb1 {
+	status = "disabled";
+};
+
+
+/* ------------ Display Controller 1 ------------------- */
+&dc1_pc {
+	status = "okay";
+};
+
+&dc1_prg1 {
+	status = "okay";
+};
+
+&dc1_prg2 {
+	status = "okay";
+};
+
+&dc1_prg3 {
+	status = "okay";
+};
+
+&dc1_prg4 {
+	status = "okay";
+};
+
+&dc1_prg5 {
+	status = "okay";
+};
+
+&dc1_prg6 {
+	status = "okay";
+};
+
+&dc1_prg7 {
+	status = "okay";
+};
+
+&dc1_prg8 {
+	status = "okay";
+};
+
+&dc1_prg9 {
+	status = "okay";
+};
+
+&dc1_dpr1_channel1 {
+	status = "okay";
+};
+
+&dc1_dpr1_channel2 {
+	status = "okay";
+};
+
+&dc1_dpr1_channel3 {
+	status = "okay";
+};
+
+&dc1_dpr2_channel1 {
+	status = "okay";
+};
+
+&dc1_dpr2_channel2 {
+	status = "okay";
+};
+
+&dc1_dpr2_channel3 {
+	status = "okay";
+};
+
+&dpu2 {
+	status = "okay";
+};
+
+&ldb2_phy {
+	status = "disabled";
+};
+
+&ldb2 {
+	status = "disabled";
+};
+
+
+/* Image Sensing Interface */
+&isi_0 {
+	status = "okay";
+
+	cap_device {
+		status = "okay";
+	};
+
+	m2m_device {
+		status = "okay";
+	};
+};
+
+&isi_1 {
+	status = "okay";
+
+	cap_device {
+		status = "okay";
+	};
+};
+
+&isi_2 {
+	status = "okay";
+
+	cap_device {
+		status = "okay";
+	};
+};
+
+&isi_3 {
+	status = "okay";
+
+	cap_device {
+		status = "okay";
+	};
+};
+
+&isi_4 {
+	status = "okay";
+
+	cap_device {
+		status = "okay";
+	};
+};
+
+&isi_5 {
+	status = "okay";
+
+	cap_device {
+		status = "okay";
+	};
+};
+
+&isi_6 {
+	status = "okay";
+
+	cap_device {
+		status = "okay";
+	};
+};
+
+&isi_7 {
+	status = "okay";
+
+	cap_device {
+		status = "okay";
+	};
+};
+
+
+/* -------------------- audio -------------------------- */
+/ {
+	sound: sound {
+		compatible = "fsl,imx-audio-wm8904";
+		model = "wm8904-audio";
+		cpu-dai = <&sai1>;
+		audio-codec = <&wm8904>;
+		asrc-controller = <&asrc0>;
+		codec-master;
+		audio-routing =
+			"Headphone Jack", "HPOUTL",
+			"Headphone Jack", "HPOUTR",
+			"Line Out Jack", "LINEOUTL",
+			"Line Out Jack", "LINEOUTR",
+			"IN1L", "Line In Jack",
+			"IN1R", "Line In Jack",
+			"IN2R", "Main MIC",
+			"Playback", "CPU-Playback",
+			"CPU-Capture", "Capture";
+	};
+};
+
+/* Freescale Asynchronous Sample Rate Converter (ASRC) Controller */
+&asrc0 {
+	fsl,asrc-rate  = <48000>;
+	status = "okay";
+};
+
+/* Freescale audio mixer */
+&amix {
+	status = "disabled";
+};
+
+/* SMARC: I2S1 (S39 .. S42) */
+/* SEVA: M.2 slot (X11) */
+&sai0 {
+	#sound-dai-cells = <0>;
+	assigned-clocks = <&clk IMX_SC_R_AUDIO_PLL_0 IMX_SC_PM_CLK_PLL>,
+			<&clk IMX_SC_R_AUDIO_PLL_0 IMX_SC_PM_CLK_SLV_BUS>,
+			<&clk IMX_SC_R_AUDIO_PLL_0 IMX_SC_PM_CLK_MST_BUS>,
+			<&sai0_lpcg 0>;
+	assigned-clock-rates = <786432000>, <49152000>, <12288000>, <49152000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_sai0>;
+	status = "okay";
+};
+
+/* SMARC: I2S0 (S50 .. S53) */
+/* SEVA: WM8904 Audio Codec */
+&sai1 {
+	assigned-clocks = <&clk IMX_SC_R_AUDIO_PLL_0 IMX_SC_PM_CLK_PLL>,
+			<&clk IMX_SC_R_AUDIO_PLL_0 IMX_SC_PM_CLK_SLV_BUS>,
+			<&clk IMX_SC_R_AUDIO_PLL_0 IMX_SC_PM_CLK_MST_BUS>,
+			<&sai1_lpcg 0>; /* FIXME: should be sai1, original code is 0 */
+	assigned-clock-rates = <786432000>, <49152000>, <12288000>, <49152000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_sai1>;
+	status = "okay";
+};
+
+
+/* -------------------- uart --------------------------- */
+&lpuart0 { /* console */
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpuart0>;
+	status = "okay";
+};
+
+&lpuart1 { /* Ser0 */
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpuart1>;
+	status = "okay";
+};
+
+&lpuart2 { /* Ser1  */
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpuart2>;
+	status = "disabled";
+};
+
+&lpuart3 { /* Ser2 */
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpuart3>;
+	status = "okay";
+};
+
+&lpuart4 { /* Ser3 */
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpuart4>;
+	status = "okay";
+};
+
+
+/* -------------------- can ---------------------------- */
+&flexcan1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_flexcan1>;
+	xceiver-supply = <&reg_vdd_3v3>;
+	status = "okay";
+};
+
+&flexcan2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_flexcan2>;
+	xceiver-supply = <&reg_vdd_3v3>;
+	status = "okay";
+};
+
+/* pins shared with ESPI_ALERT0 (SMARC S43) */
+/* and ESPI_ALERT1 (SMARC S44) */
+&flexcan3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_flexcan3>;
+	xceiver-supply = <&reg_vdd_3v3>;
+	status = "disabled";
+};
+
+
+/* -------------------- ethernet ----------------------- */
+&fec1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fec1>;
+	phy-mode = "rgmii-id";
+	phy-handle = <&ethphy0>;
+	nvmem-cells = <&fec_mac0>;
+	nvmem-cell-names = "mac-address";
+	fsl,magic-packet;
+	fsl,mii-exclusive;
+	status = "okay";
+
+	mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ethphy0: ethernet-phy@0 {
+			compatible = "ethernet-phy-ieee802.3-c22";
+			reg = <4>;
+			at803x,eee-disabled;
+			at803x,vddio-1p8v;
+		};
+	};
+};
+
+&fec2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fec2>;
+	phy-mode = "rgmii-id";
+	phy-handle = <&ethphy1>;
+	nvmem-cells = <&fec_mac1>;
+	nvmem-cell-names = "mac-address";
+	fsl,magic-packet;
+	fsl,mii-exclusive;
+	status = "okay";
+
+	mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ethphy1: ethernet-phy@1 {
+			compatible = "ethernet-phy-ieee802.3-c22";
+			reg = <6>;
+			at803x,eee-disabled;
+			at803x,vddio-1p8v;
+		};
+	};
+};
+
+
+/* -------------------- spi ---------------------------- */
+/* SPI bus on module with flash device */
+&flexspi0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_flexspi0>;
+	status = "okay";
+
+	flash0: m25p80@0 {
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "winbond,w25q64dw", "jedec,spi-nor";
+		spi-max-frequency = <20000000>;
+		spi-tx-bus-width = <4>;
+		spi-rx-bus-width = <4>;
+
+		partition@0 {
+			label = "boot";
+			reg = <0x0000000 0x400000>;
+		};
+
+		partition@400000 {
+			label = "failsafe";
+			reg = <0x400000 0x3e0000>;
+		};
+
+		partition@7e0000 {
+			label = "reserved";
+			reg = <0x7e0000 0x20000>;
+			read-only;
+		};
+	};
+};
+
+/* SPI bus on SMARC connector */
+&lpspi2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	fsl,spi-num-chipselects = <1>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpspi2 &pinctrl_lpspi2_cs>;
+	cs-gpios = <&lsio_gpio3 10 GPIO_ACTIVE_LOW>,
+	           <&lsio_gpio3 11 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	/*
+	flash1: m25p80@0 {
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "winbond,w25q64dw", "jedec,spi-nor";
+		spi-max-frequency = <5000000>;
+	};
+	*/
+};
+
+
+/* -------------------- SD-cards ----------------------- */
+/* SMX8: onboard eMMC */
+&usdhc1 {
+	pinctrl-names = "default", "state_100mhz", "state_200mhz";
+	pinctrl-0 = <&pinctrl_usdhc1>;
+	pinctrl-1 = <&pinctrl_usdhc1>;
+	pinctrl-2 = <&pinctrl_usdhc1>;
+	bus-width = <8>;
+	no-sd;
+	no-sdio;
+	non-removable;
+	status = "okay";
+};
+
+
+/* SMX8: SMARC SDHC interface */
+&usdhc2 {
+	pinctrl-names = "default", "state_100mhz", "state_200mhz";
+	pinctrl-0 = <&pinctrl_usdhc2>, <&pinctrl_usdhc2_gpio>;
+	pinctrl-1 = <&pinctrl_usdhc2>, <&pinctrl_usdhc2_gpio>;
+	pinctrl-2 = <&pinctrl_usdhc2>, <&pinctrl_usdhc2_gpio>;
+	bus-width = <4>;
+	vmmc-supply = <&reg_usdhc2_vmmc>;
+	cd-gpios = <&lsio_gpio5 22 GPIO_ACTIVE_LOW>;  /* SMARC: P35 SDIO_CD# */
+	wp-gpios = <&lsio_gpio5 21 GPIO_ACTIVE_HIGH>; /* SMARC: P33 SDIO_WP */
+	status = "okay";
+
+	/* on SEVA backplane the SD-card interface has layout issues */
+	/* for proper operation we have to limit bus frequency */
+	/* max-frequency = <50000000>; */
+};
+
+
+/* SMX8: onboard micro-SD card slot */
+&usdhc3 {
+	pinctrl-names = "default", "state_100mhz", "state_200mhz";
+	pinctrl-0 = <&pinctrl_usdhc3>, <&pinctrl_usdhc3_gpio>;
+	pinctrl-1 = <&pinctrl_usdhc3>, <&pinctrl_usdhc3_gpio>;
+	pinctrl-2 = <&pinctrl_usdhc3>, <&pinctrl_usdhc3_gpio>;
+	bus-width = <4>;
+	cd-gpios = <&lsio_gpio4 12 GPIO_ACTIVE_LOW>;
+	vmmc-supply = <&reg_usdhc3_vmmc>;
+	status = "okay";
+};
+
+
+/* -------------------- pci-e & sata ------------------- */
+&pciea{
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pciea>;
+	reset-gpio = <&lsio_gpio4 29 GPIO_ACTIVE_LOW>;   /* SMARC P75 : PCIE0_RST# */
+	clkreq-gpio = <&lsio_gpio4 27 GPIO_ACTIVE_LOW>;
+	ext_osc = <1>;
+	epdev_on-supply = <&reg_vdd_3v3>;
+	status = "okay";
+};
+
+
+/* SMARC S146: PCIE_WAKE# */
+/* this pin is routed to pcie_ctrl0_wake and ctrl1_wake */
+/* we use only ctrl0_wake as an wakeup interrupt */
+&lsio_gpio4 {
+	pad-wakeup-num = <1>;
+	pad-wakeup = <IMX8QM_PCIE_CTRL0_WAKE_B 4 28>;
+};
+
+
+/* pins shared with sata */
+&pcieb{
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pcieb>;
+	reset-gpio = <&lsio_gpio5 0 GPIO_ACTIVE_LOW>;     /* SMARC S76 : PCIE1_RST# (also PCIE1_RST#_WIFI */
+	clkreq-gpio = <&lsio_gpio4 30 GPIO_ACTIVE_LOW>;
+	epdev_on-supply = <&reg_vdd_3v3>;
+	ext_osc = <1>;
+	status = "disabled";
+};
+
+
+/* pins shared with pcie-b */
+&sata {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pcieb>;
+	clkreq-gpio = <&lsio_gpio4 30 GPIO_ACTIVE_LOW>;
+	ext_osc = <1>;
+	fsl,phy-imp = <0x5d>; /* 100 Ohm */
+	ahci-supply = <&reg_vdd_3v3>;
+	phy-supply = <&reg_vdd_3v3>;
+	target-supply = <&reg_vdd_3v3>;
+	status = "okay";
+};
+
+
+/* -------------------- usb ---------------------------- */
+&usbphy1 {
+	phy-3p0-supply = <&reg_vdd_3v3>;
+	status = "okay";
+};
+
+&usb3phynop1 {
+	vcc-supply = <&reg_vdd_3v3>;
+	status = "okay";
+};
+
+&usbotg1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_usbotg1>;
+	srp-disable;
+	hnp-disable;
+	adp-disable;
+	power-active-high;
+	disable-over-current;
+	vbus-supply = <&reg_vdd_5v>;
+	status = "okay";
+};
+
+&usbotg3 {
+	dr_mode = "host";
+	status = "okay";
+};
+
+
+/* -------------------- i2c ---------------------------- */
+/* /dev/i2c-2 */
+&i2c0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clock-frequency = <100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c0>;
+	status = "okay";
+
+	rtc_ext: m41t62@68 {
+		compatible = "st,m41t62";
+		reg = <0x68>;
+	};
+};
+
+
+/* /dev/i2c-3 */
+/* SEVA: WM8904 sound: 0x1A */
+/* SEAV: U40: GP i2c-EEPROM: 0x50 .. 0x57 */
+&i2c1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clock-frequency = <100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c1>;
+	status = "okay";
+
+	wm8904: wm8904@1a {
+		compatible = "wlf,wm8904";
+		reg = <0x1a>;
+		clocks = <&mclkout1_lpcg 0>;
+		clock-names = "mclk";
+
+		DCVDD-supply = <&reg_vdd_3v3>;
+		DBVDD-supply = <&reg_vdd_3v3>;
+		AVDD-supply = <&reg_vdd_3v3>;
+		CPVDD-supply = <&reg_vdd_3v3>;
+		MICVDD-supply = <&reg_vdd_3v3>;
+	};
+};
+
+
+/* /dev/i2c-4 */
+/* SEVA: X11: M.2 */
+/* SEVA: U42: PM i2c-EEPROM */
+/* SEVA: SMBUS */
+&i2c2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clock-frequency = <100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	status = "okay";
+};
+
+
+/* -------------------- enc/decoder -------------------- */
+&jpegdec {
+       status = "okay";
+};
+
+&jpegenc {
+       status = "okay";
+};
+
+
+/* -------------------- pwm ---------------------------- */
+/* definition of pwm subsystems (missing in imx8-ss-lsio.dtsi) */
+&lsio_subsys{
+	pwm0: pwm@5d000000 {
+		compatible = "fsl,imx8qm-pwm", "fsl,imx27-pwm";
+		reg = <0x5d000000 0x10000>;
+		clock-names = "ipg", "per";
+		clocks = <&pwm0_lpcg 4>,
+			 <&pwm0_lpcg 1>;
+		assigned-clocks = <&clk IMX_SC_R_PWM_0 IMX_SC_PM_CLK_PER>;
+		assigned-clock-rates = <24000000>;
+		#pwm-cells = <2>;
+		status = "disabled";
+	};
+
+	pwm1: pwm@5d010000 {
+		compatible = "fsl,imx8qm-pwm", "fsl,imx27-pwm";
+		reg = <0x5d010000 0x10000>;
+		clock-names = "ipg", "per";
+		clocks = <&pwm1_lpcg 4>,
+			 <&pwm1_lpcg 1>;
+		assigned-clocks = <&clk IMX_SC_R_PWM_1 IMX_SC_PM_CLK_PER>;
+		assigned-clock-rates = <24000000>;
+		#pwm-cells = <2>;
+		status = "disabled";
+	};
+};
+
+/* SMARC P113: GPIO5 / PWM_OUT */
+/* SEVA backplane: CPU fan connector*/
+&pwm0{
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pwm0>;
+	#pwm-cells = <3>;
+	status = "okay";
+};
+
+/* SMARC P118: GPIO10 / PWM_OUT */
+/* SEVA backplane: beeper */
+&pwm1{
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pwm1>;
+	#pwm-cells = <3>;
+	status = "okay";
+};
+
+/ {
+	pwm_fan: pwm-fanctrl {
+		compatible = "pwm-fan";
+		pwms = <&pwm0 0 100000 0>;
+		#cooling-cells = <2>;
+
+		cooling-min-state = <0>;
+		cooling-max-state = <3>;
+		cooling-levels = <50 150 200 250>;
+	};
+
+	pwm_beeper: pwm-beeper {
+		compatible = "pwm-beeper";
+		pwms = <&pwm1 0 100000  0>;
+		amp-supply = <&reg_vdd_3v3>;
+	};
+};
+
+
+/* -------------------- pin_ctrl ----------------------- */
+&iomuxc {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_hog>;
+
+	pinctrl_hog: hoggrp{
+		fsl,pins = <
+			IMX8QM_MIPI_CSI0_GPIO0_01_LSIO_GPIO1_IO28	0x00000021 /* GPIO 0 (476)/CAM0 PWR-en#; SMARC P108 */
+			IMX8QM_MIPI_CSI1_GPIO0_01_LSIO_GPIO1_IO31	0x00000021 /* GPIO 1 (479)/CAM1 PWR-en#; SMARC P109 */
+			IMX8QM_MIPI_CSI0_GPIO0_00_LSIO_GPIO1_IO27	0x00000021 /* GPIO 2 (475)/CAM0_RST#; SMARC P110 */
+			IMX8QM_MIPI_CSI1_GPIO0_00_LSIO_GPIO1_IO30	0x00000021 /* GPIO 3 (478)/CAM1_RST#; SMARC P111 */
+			IMX8QM_SAI1_RXFS_LSIO_GPIO3_IO14			0x00000021 /* GPIO 4 (398)/I2S0_RST#; SMARC P112*/
+			IMX8QM_SPDIF0_RX_LSIO_GPIO2_IO14			0x00000021 /* GPIO 6 (430)/TACHIN; SMARC P114 */
+			IMX8QM_ESAI1_SCKT_LSIO_GPIO2_IO07			0x00000021 /* GPIO 7 (423); SMARC P115 */
+			IMX8QM_ESAI1_TX0_LSIO_GPIO2_IO08			0x00000021 /* GPIO 8 (424); SMARC P116 */
+			IMX8QM_ESAI1_TX1_LSIO_GPIO2_IO09			0x00000021 /* GPIO 9 (425); SMARC P117 */
+			IMX8QM_SAI1_RXC_LSIO_GPIO3_IO12				0x00000021 /* GPIO 11 (396); SMARC P119 */
+			IMX8QM_ESAI0_TX0_LSIO_GPIO2_IO26			0x00000021 /* ENET1, int pin */
+			IMX8QM_GPT0_COMPARE_LSIO_GPIO0_IO16			0x00000021 /* ENET0, int pin */
+
+			IMX8QM_SPI3_SDI_LSIO_GPIO2_IO19             0x00000021 /* CHARGER_PRSNT# */
+			IMX8QM_SPI3_SDO_LSIO_GPIO2_IO18             0x00000021 /* CHARGING# */
+			IMX8QM_SPI3_CS1_LSIO_GPIO2_IO21             0x00000021 /* BATLOW# */
+			IMX8QM_ESAI1_TX2_RX3_LSIO_GPIO2_IO10        0x00000021 /* SATA_ACT# */
+
+			IMX8QM_SPDIF0_TX_AUD_ACM_MCLK_OUT1			0x06000040 /* MCLK for ext I2S codec */
+
+			/* pcie */
+			IMX8QM_MLB_SIG_LSIO_GPIO3_IO26				0x00000021 /* oe control for PCIe clk buffer */
+			IMX8QM_MLB_DATA_LSIO_GPIO3_IO28				0x00000021 /* oe control for PCIe clk buffer */
+
+			/* IMX8QM_MLB_CLK_LSIO_GPIO3_IO27				0x00000021 GPIO for CAM CLK multiplexer (CSI 0/1) */
+
+			/* GPIO 5 (502), disabled because shared with PWM */
+			/* IMX8QM_UART0_RTS_B_LSIO_GPIO0_IO22		0x00000021 */
+
+			/* GPIO 10 (503), disabled because shared with PWM */
+			/* IMX8QM_UART0_CTS_B_LSIO_GPIO0_IO23		0x00000021 */
+		>;
+	};
+
+
+	pinctrl_fec1: fec1grp {
+		fsl,pins = <
+			IMX8QM_COMP_CTL_GPIO_1V8_3V3_ENET_ENETB_PAD		0x000014a0
+			IMX8QM_ENET0_MDC_CONN_ENET0_MDC					0x06000020
+			IMX8QM_ENET0_MDIO_CONN_ENET0_MDIO				0x06000020
+			IMX8QM_ENET0_RGMII_TX_CTL_CONN_ENET0_RGMII_TX_CTL	0x00000060
+			IMX8QM_ENET0_RGMII_TXC_CONN_ENET0_RGMII_TXC		0x00000060
+			IMX8QM_ENET0_RGMII_TXD0_CONN_ENET0_RGMII_TXD0	0x00000060
+			IMX8QM_ENET0_RGMII_TXD1_CONN_ENET0_RGMII_TXD1	0x00000060
+			IMX8QM_ENET0_RGMII_TXD2_CONN_ENET0_RGMII_TXD2	0x00000060
+			IMX8QM_ENET0_RGMII_TXD3_CONN_ENET0_RGMII_TXD3	0x00000060
+			IMX8QM_ENET0_RGMII_RXC_CONN_ENET0_RGMII_RXC		0x00000060
+			IMX8QM_ENET0_RGMII_RX_CTL_CONN_ENET0_RGMII_RX_CTL	0x00000060
+			IMX8QM_ENET0_RGMII_RXD0_CONN_ENET0_RGMII_RXD0	0x00000020
+			IMX8QM_ENET0_RGMII_RXD1_CONN_ENET0_RGMII_RXD1	0x00000020
+			IMX8QM_ENET0_RGMII_RXD2_CONN_ENET0_RGMII_RXD2	0x00000020
+			IMX8QM_ENET0_RGMII_RXD3_CONN_ENET0_RGMII_RXD3	0x00000020
+		>;
+	};
+
+
+	pinctrl_fec2: fec2grp {
+		fsl,pins = <
+			IMX8QM_COMP_CTL_GPIO_1V8_3V3_ENET_ENETA_PAD		0x000014a0
+			IMX8QM_ENET1_MDC_CONN_ENET1_MDC					0x06000020
+			IMX8QM_ENET1_MDIO_CONN_ENET1_MDIO				0x06000020
+			IMX8QM_ENET1_RGMII_TX_CTL_CONN_ENET1_RGMII_TX_CTL	0x00000060
+			IMX8QM_ENET1_RGMII_TXC_CONN_ENET1_RGMII_TXC		0x00000060
+			IMX8QM_ENET1_RGMII_TXD0_CONN_ENET1_RGMII_TXD0	0x00000060
+			IMX8QM_ENET1_RGMII_TXD1_CONN_ENET1_RGMII_TXD1	0x00000060
+			IMX8QM_ENET1_RGMII_TXD2_CONN_ENET1_RGMII_TXD2	0x00000060
+			IMX8QM_ENET1_RGMII_TXD3_CONN_ENET1_RGMII_TXD3	0x00000060
+			IMX8QM_ENET1_RGMII_RXC_CONN_ENET1_RGMII_RXC		0x00000060
+			IMX8QM_ENET1_RGMII_RX_CTL_CONN_ENET1_RGMII_RX_CTL	0x00000060
+			IMX8QM_ENET1_RGMII_RXD0_CONN_ENET1_RGMII_RXD0	0x00000020
+			IMX8QM_ENET1_RGMII_RXD1_CONN_ENET1_RGMII_RXD1	0x00000020
+			IMX8QM_ENET1_RGMII_RXD2_CONN_ENET1_RGMII_RXD2	0x00000020
+			IMX8QM_ENET1_RGMII_RXD3_CONN_ENET1_RGMII_RXD3	0x00000020
+		>;
+	};
+
+
+	pinctrl_flexspi0: flexspi0grp {
+		fsl,pins = <
+			IMX8QM_QSPI0A_DATA0_LSIO_QSPI0A_DATA0     0x06000021
+			IMX8QM_QSPI0A_DATA1_LSIO_QSPI0A_DATA1     0x06000021
+			IMX8QM_QSPI0A_DATA2_LSIO_QSPI0A_DATA2     0x06000021
+			IMX8QM_QSPI0A_DATA3_LSIO_QSPI0A_DATA3     0x06000021
+			IMX8QM_QSPI0A_DQS_LSIO_QSPI0A_DQS         0x06000021
+			IMX8QM_QSPI0A_SS0_B_LSIO_QSPI0A_SS0_B     0x06000021
+			IMX8QM_QSPI0A_SS1_B_LSIO_QSPI0A_SS1_B     0x06000021
+			IMX8QM_QSPI0A_SCLK_LSIO_QSPI0A_SCLK       0x06000021
+			IMX8QM_QSPI0B_SCLK_LSIO_QSPI0B_SCLK       0x06000021
+			IMX8QM_QSPI0B_DATA0_LSIO_QSPI0B_DATA0     0x06000021
+			IMX8QM_QSPI0B_DATA1_LSIO_QSPI0B_DATA1     0x06000021
+			IMX8QM_QSPI0B_DATA2_LSIO_QSPI0B_DATA2     0x06000021
+			IMX8QM_QSPI0B_DATA3_LSIO_QSPI0B_DATA3     0x06000021
+			IMX8QM_QSPI0B_DQS_LSIO_QSPI0B_DQS         0x06000021
+			IMX8QM_QSPI0B_SS0_B_LSIO_QSPI0B_SS0_B     0x06000021
+			IMX8QM_QSPI0B_SS1_B_LSIO_QSPI0B_SS1_B     0x06000021
+		>;
+	};
+
+
+	pinctrl_flexcan1: flexcan0grp {
+		fsl,pins = <
+			IMX8QM_FLEXCAN0_TX_DMA_FLEXCAN0_TX            0x21
+			IMX8QM_FLEXCAN0_RX_DMA_FLEXCAN0_RX            0x21
+		>;
+	};
+
+
+	pinctrl_flexcan2: flexcan1grp {
+		fsl,pins = <
+			IMX8QM_FLEXCAN1_TX_DMA_FLEXCAN1_TX            0x21
+			IMX8QM_FLEXCAN1_RX_DMA_FLEXCAN1_RX            0x21
+			>;
+	};
+
+
+	pinctrl_flexcan3: flexcan3grp {
+		fsl,pins = <
+			IMX8QM_FLEXCAN2_TX_DMA_FLEXCAN2_TX            0x21
+			IMX8QM_FLEXCAN2_RX_DMA_FLEXCAN2_RX            0x21
+			>;
+	};
+
+
+	pinctrl_i2c0: i2c0grp {
+		fsl,pins = <
+			IMX8QM_HDMI_TX0_TS_SCL_DMA_I2C0_SCL	0x06000021
+			IMX8QM_HDMI_TX0_TS_SDA_DMA_I2C0_SDA	0x06000021
+		>;
+	};
+
+
+	pinctrl_i2c1: i2c1grp {
+		fsl,pins = <
+			IMX8QM_GPT0_CLK_DMA_I2C1_SCL		0x0600004c
+			IMX8QM_GPT0_CAPTURE_DMA_I2C1_SDA 	0x0600004c
+		>;
+	};
+
+
+	pinctrl_i2c2: i2c2grp {
+		fsl,pins = <
+			IMX8QM_GPT1_CLK_DMA_I2C2_SCL			0x0600004c
+			IMX8QM_GPT1_CAPTURE_DMA_I2C2_SDA		0x0600004c
+		>;
+	};
+
+
+	pinctrl_lpspi2: lpspi2grp {
+		fsl,pins = <
+			IMX8QM_SPI2_SCK_DMA_SPI2_SCK		0x0600004c
+			IMX8QM_SPI2_SDO_DMA_SPI2_SDO		0x0600004c
+			IMX8QM_SPI2_SDI_DMA_SPI2_SDI		0x0600004c
+		>;
+	};
+
+
+	pinctrl_lpspi2_cs: lpspi2cs {
+		fsl,pins = <
+			IMX8QM_SPI2_CS0_LSIO_GPIO3_IO10		0x21
+			IMX8QM_SPI2_CS1_LSIO_GPIO3_IO11		0x21
+		>;
+	};
+
+
+	pinctrl_lpuart0: lpuart0grp {
+		fsl,pins = <
+			IMX8QM_UART0_RX_DMA_UART0_RX				0x06000020
+			IMX8QM_UART0_TX_DMA_UART0_TX				0x06000020
+		>;
+	};
+
+
+	pinctrl_lpuart1: lpuart1grp {
+		fsl,pins = <
+			IMX8QM_UART1_RX_DMA_UART1_RX		0x06000020
+			IMX8QM_UART1_TX_DMA_UART1_TX		0x06000020
+			IMX8QM_UART1_CTS_B_DMA_UART1_CTS_B	0x06000020
+			IMX8QM_UART1_RTS_B_DMA_UART1_RTS_B	0x06000020
+		>;
+	};
+
+
+	pinctrl_lpuart2: lpuart2grp {
+		fsl,pins = <
+			IMX8QM_UART0_RTS_B_DMA_UART2_RX		0x06000020
+			IMX8QM_UART0_CTS_B_DMA_UART2_TX		0x06000020
+		>;
+	};
+
+
+	pinctrl_lpuart3: lpuart3grp {
+		fsl,pins = <
+			IMX8QM_M41_GPIO0_00_DMA_UART3_RX		0x06000020
+			IMX8QM_M41_GPIO0_01_DMA_UART3_TX		0x06000020
+		>;
+	};
+
+
+	pinctrl_lpuart4: lpuart4grp {
+		fsl,pins = <
+			IMX8QM_M40_GPIO0_00_DMA_UART4_RX		0x06000020
+			IMX8QM_M40_GPIO0_01_DMA_UART4_TX		0x06000020
+		>;
+	};
+
+
+	pinctrl_pwm_lvds0: pwmlvds0grp {
+		fsl,pins = <
+			IMX8QM_LVDS0_GPIO00_LVDS0_PWM0_OUT		0x00000020
+		>;
+	};
+
+
+	pinctrl_pwm_lvds1: pwmlvds1grp {
+		fsl,pins = <
+			IMX8QM_LVDS1_GPIO00_LVDS1_PWM0_OUT		0x00000020
+		>;
+	};
+
+	pinctrl_pwm0: pwm0grp {
+		fsl,pins = <
+			IMX8QM_UART0_RTS_B_LSIO_PWM0_OUT        0x00000020 /* SMARC P113: GPIO5 / PWM_OUT */
+		>;
+	};
+
+	pinctrl_pwm1: pwm1grp {
+		fsl,pins = <
+			IMX8QM_UART0_CTS_B_LSIO_PWM1_OUT        0x00000020 /* SMARC P118: GPIO10 / PWM_OUT */
+		>;
+	};
+
+
+	pinctrl_pciea: pcieagrp{
+		fsl,pins = <
+			IMX8QM_PCIE_CTRL0_CLKREQ_B_LSIO_GPIO4_IO27		0x00000021 /* clock request */
+			IMX8QM_PCIE_CTRL0_WAKE_B_LSIO_GPIO4_IO28		0x04000021 /* SMARC S146: PCIE_WAKE# */
+			IMX8QM_PCIE_CTRL0_PERST_B_LSIO_GPIO4_IO29		0x06000021 /* SMARC P75 : PCIE0_RST# */
+		>;
+	};
+
+
+	/* shared with sata (stuffing options) */
+	pinctrl_pcieb: pciebgrp{
+		fsl,pins = <
+			IMX8QM_PCIE_CTRL1_CLKREQ_B_LSIO_GPIO4_IO30		0x00000021 /* clock request */
+			IMX8QM_PCIE_CTRL1_WAKE_B_LSIO_GPIO4_IO31		0x04000021 /* SMARC S146: PCIE_WAKE# */
+			IMX8QM_PCIE_CTRL1_PERST_B_LSIO_GPIO5_IO00		0x06000021 /* SMARC S76 : PCIE1_RST# (also PCIE1_RST#_WIFI */
+
+			/* activity led defined in hoggroup to prevent floating pins if not used */
+			/* IMX8QM_ESAI1_TX2_RX3_LSIO_GPIO2_IO10			0x00000021 SMARC S54 : SATA_ACT# (activity led) */
+		>;
+	};
+
+
+	pinctrl_sai0: sai0grp {
+		fsl,pins = <
+			IMX8QM_SPI0_SDI_AUD_SAI0_RXD			0x06000040 /* I2S1_SDIN */
+			IMX8QM_SPI0_SDO_AUD_SAI0_TXD			0x06000060 /* I2S1_SDOUT*/
+			IMX8QM_SPI0_CS1_AUD_SAI0_TXC			0x06000040 /* I2S0_CK */
+			IMX8QM_SPI0_CS0_AUD_SAI0_RXFS			0x06000040 /* I2S1 LRCK */
+		>;
+	};
+
+
+	pinctrl_sai1: sai1grp {
+		fsl,pins = <
+			IMX8QM_SAI1_RXD_AUD_SAI1_RXD			0x06000040 /* I2S0_SDIN */
+			IMX8QM_SAI1_TXD_AUD_SAI1_TXD			0x06000060 /* I2S0_SDOUT*/
+			IMX8QM_SAI1_TXC_AUD_SAI1_TXC			0x06000040 /* I2S0_CK */
+			IMX8QM_SAI1_TXFS_AUD_SAI1_TXFS			0x06000040 /* I2S0 LRCK */
+		>;
+	};
+
+
+	pinctrl_usbotg1: usbotg1 {
+		fsl,pins = <
+			IMX8QM_USB_SS3_TC0_CONN_USB_OTG1_PWR       0x00000021
+		>;
+	};
+
+
+	pinctrl_usdhc1: usdhc1grp {
+		fsl,pins = <
+			IMX8QM_EMMC0_CLK_CONN_EMMC0_CLK             0x06000041
+			IMX8QM_EMMC0_CMD_CONN_EMMC0_CMD             0x00000021
+			IMX8QM_EMMC0_DATA0_CONN_EMMC0_DATA0         0x00000021
+			IMX8QM_EMMC0_DATA1_CONN_EMMC0_DATA1         0x00000021
+			IMX8QM_EMMC0_DATA2_CONN_EMMC0_DATA2         0x00000021
+			IMX8QM_EMMC0_DATA3_CONN_EMMC0_DATA3         0x00000021
+			IMX8QM_EMMC0_DATA4_CONN_EMMC0_DATA4         0x00000021
+			IMX8QM_EMMC0_DATA5_CONN_EMMC0_DATA5         0x00000021
+			IMX8QM_EMMC0_DATA6_CONN_EMMC0_DATA6         0x00000021
+			IMX8QM_EMMC0_DATA7_CONN_EMMC0_DATA7         0x00000021
+			IMX8QM_EMMC0_STROBE_CONN_EMMC0_STROBE       0x00000041
+			IMX8QM_EMMC0_RESET_B_CONN_EMMC0_RESET_B     0x00000021
+		>;
+	};
+
+
+	pinctrl_usdhc2_gpio: usdhc2grpgpio {
+		fsl,pins = <
+			IMX8QM_USDHC1_DATA6_LSIO_GPIO5_IO21         0x00000021  /* SMARC: P33 SDIO_WP */
+			IMX8QM_USDHC1_DATA7_LSIO_GPIO5_IO22	        0x00000021  /* SMARC: P35 SDIO_CD# */
+			IMX8QM_USDHC1_RESET_B_LSIO_GPIO4_IO07       0x00000021  /* SMARC: P37 SDIO_PWR_EN */
+		>;
+	};
+
+
+	pinctrl_usdhc2: usdhc2grp {
+		fsl,pins = <
+			IMX8QM_USDHC1_CLK_CONN_USDHC1_CLK           0x06000041
+			IMX8QM_USDHC1_CMD_CONN_USDHC1_CMD           0x00000021
+			IMX8QM_USDHC1_DATA0_CONN_USDHC1_DATA0       0x00000021
+			IMX8QM_USDHC1_DATA1_CONN_USDHC1_DATA1       0x00000021
+			IMX8QM_USDHC1_DATA2_CONN_USDHC1_DATA2       0x00000021
+			IMX8QM_USDHC1_DATA3_CONN_USDHC1_DATA3       0x00000021
+			IMX8QM_USDHC1_VSELECT_CONN_USDHC1_VSELECT   0x00000021
+		>;
+	};
+
+
+	pinctrl_usdhc3_gpio: usdhc3grpgpio {
+		fsl,pins = <
+			IMX8QM_USDHC2_RESET_B_LSIO_GPIO4_IO09    0x00000021  /* reset */
+			IMX8QM_USDHC2_CD_B_LSIO_GPIO4_IO12       0x00000021  /* change detect signal */
+		>;
+	};
+
+
+	pinctrl_usdhc3: usdhc3grp {
+		fsl,pins = <
+			IMX8QM_USDHC2_CLK_CONN_USDHC2_CLK         0x06000041
+			IMX8QM_USDHC2_CMD_CONN_USDHC2_CMD         0x00000021
+			IMX8QM_USDHC2_DATA0_CONN_USDHC2_DATA0     0x00000021
+			IMX8QM_USDHC2_DATA1_CONN_USDHC2_DATA1     0x00000021
+			IMX8QM_USDHC2_DATA2_CONN_USDHC2_DATA2     0x00000021
+			IMX8QM_USDHC2_DATA3_CONN_USDHC2_DATA3     0x00000021
+			IMX8QM_USDHC2_VSELECT_CONN_USDHC2_VSELECT 0x00000021
+		>;
+	};
+
+
+	/* SMARC: S139 (SCL) and S140 (SDA) */
+	pinctrl_lvds0_lpi2c1: lvds0lpi2c1grp {
+		fsl,pins = <
+			IMX8QM_LVDS0_I2C1_SCL_LVDS0_I2C1_SCL	0xc600004c
+			IMX8QM_LVDS0_I2C1_SDA_LVDS0_I2C1_SDA	0xc600004c
+		>;
+	};
+
+
+	/* SMARC: S133 */
+	pinctrl_lvds0_vdd_en: lvds0_vdd_engrp{
+		fsl,pins = <
+			IMX8QM_LVDS0_I2C0_SCL_LSIO_GPIO1_IO06		0x06000000
+		>;
+	};
+
+
+	/* SMARC: S127 */
+	pinctrl_lvds0_backlight_en: lvds0_backlight_engrp{
+		fsl,pins = <
+			IMX8QM_LVDS0_I2C0_SDA_LSIO_GPIO1_IO07		0x06000000
+		>;
+	};
+
+
+	/* SMARC: S116 */
+	pinctrl_lvds1_vdd_en: lvds1_vdd_engrp{
+		fsl,pins = <
+			IMX8QM_LVDS1_I2C0_SCL_LSIO_GPIO1_IO12		0x06000000
+		>;
+	};
+
+
+	/* SMARC: S107 */
+	pinctrl_lvds1_backlight_en: lvds1_backlight_engrp{
+		fsl,pins = <
+			IMX8QM_LVDS1_I2C0_SDA_LSIO_GPIO1_IO13		0x06000000
+		>;
+	};
+
+
+	/* SMARC: S122 */
+	pinctrl_lvds1_backlight_pwm: lvds1_backlight_pwmgrp{
+		fsl,pins = <
+			IMX8QM_LVDS1_GPIO00_LVDS1_PWM0_OUT			0x06000000
+		>;
+	};
+};
+
+
+/* -------------------- thermal ------------------------ */
+&thermal_zones {
+
+	cpu-thermal0 {
+		polling-delay-passive = <250>;
+		polling-delay = <5000>;
+
+		trips {
+			/* ATTENTION:
+			 * trip 0 have to be of type "passive"
+			 * and trip 1 have to be of type "critical".
+			 *
+			 * This is because imx_sc_thermal only supports
+			 * those two trip types and only in exact this order
+			 *
+			 * All active trips following the first both trips
+			 * (with assigned pwm-fan) are handled
+			 * by generic thermal framework
+			 */
+			cpu_alert0: trip0 {
+				temperature = <90000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+			cpu_crit0: trip1 {
+				temperature = <105000>;
+				hysteresis = <1000>;
+				type = "critical";
+			};
+			cpu_low0: trip2 {
+				temperature = <50000>;
+				hysteresis = <1000>;
+				type = "active";
+			};
+			cpu_high0: trip3 {
+				temperature = <60000>;
+				hysteresis = <1000>;
+				type = "active";
+			};
+			cpu_hot0: trip4 {
+				temperature = <70000>;
+				hysteresis = <1000>;
+				type = "active";
+			};
+		};
+
+		cooling-maps {
+			/* map0 is defined in imx8qm.dtsi
+			 * for cpu_alert0 cooling state (on 90°C)
+			 */
+
+			/* use pwm_fan 150 from 50° on */
+			map1 {
+				trip = <&cpu_low0>;
+				cooling-device = <&pwm_fan 1 1>;
+			};
+			/* use pwm_fan 200 from 60° on */
+			map2 {
+				trip = <&cpu_high0>;
+				cooling-device = <&pwm_fan 2 2>;
+			};
+			/* use pwm_fan 250 from 70° on */
+			map3 {
+				trip = <&cpu_hot0>;
+				cooling-device = <&pwm_fan 3 3>;
+			};
+		};
+	};
+
+	pmic-thermal0 {
+		polling-delay-passive = <250>;
+		polling-delay = <2000>;
+		thermal-sensors = <&tsens IMX_SC_R_PMIC_0>;
+
+		trips {
+			pmic_alert0: trip0 {
+				temperature = <110000>;
+				hysteresis = <2000>;
+				type = "passive";
+			};
+			pmic_crit0: trip1 {
+				temperature = <125000>;
+				hysteresis = <2000>;
+				type = "critical";
+			};
+		};
+
+		cooling-maps {
+			map0 {
+				trip = <&pmic_alert0>;
+				cooling-device =
+				<&A53_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+				<&A53_1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+				<&A53_2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+				<&A53_3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+				<&A72_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+				<&A72_1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+			};
+		};
+	};
+};
+
+
+/* -------------------- dsp (not avail) ---------------- */
+&dsp {
+	compatible = "fsl,imx8qm-dsp-v1";
+	status = "disabled";
+};
+
+
+/* -------------------- gpu ---------------------------- */
+&gpu_3d0{
+	status = "okay";
+};
+
+
+&gpu_3d1{
+	status = "okay";
+};
+
+
+&imx8_gpu_ss {
+	memory-region=<&gpu_reserved>;
+	status = "okay";
+};
+
+
+/* -------------------- message units ------------------ */
+&mu_m0{
+	interrupts = <GIC_SPI 472 IRQ_TYPE_LEVEL_HIGH>;
+	// status = "okay";
+};
+
+&mu1_m0{
+	interrupts = <GIC_SPI 473 IRQ_TYPE_LEVEL_HIGH>;
+	// status = "okay";
+};
+
+&mu2_m0{
+	interrupts = <GIC_SPI 474 IRQ_TYPE_LEVEL_HIGH>;
+	status = "okay";
+};
+
+&mu3_m0{
+	interrupts = <GIC_SPI 475 IRQ_TYPE_LEVEL_HIGH>;
+	status = "okay";
+};
+
+
+/* -------------------- vpu ---------------------------- */
+&vpu_decoder {
+	compatible = "nxp,imx8qm-b0-vpudec";
+	boot-region = <&decoder_boot>;
+	rpc-region = <&decoder_rpc>;
+	reg-csr = <0x2d080000>;
+	core_type = <2>;
+	status = "okay";
+};
+
+&vpu_ts {
+	compatible = "nxp,imx8qm-b0-vpu-ts";
+	boot-region = <&ts_boot>;
+	reg-csr = <0x2d0b0000>;
+	status = "okay";
+};
+
+&vpu_encoder {
+	compatible = "nxp,imx8qm-b0-vpuenc";
+	boot-region = <&encoder_boot>;
+	rpc-region = <&encoder_rpc>;
+	reserved-region = <&encoder_reserved>;
+	reg-rpc-system = <0x40000000>;
+	resolution-max = <1920 1920>;
+	power-domains = <&pd IMX_SC_R_VPU_ENC_0>, <&pd IMX_SC_R_VPU_ENC_1>,
+			<&pd IMX_SC_R_VPU>;
+	power-domain-names = "vpuenc1", "vpuenc2", "vpu";
+	mbox-names = "enc1_tx0", "enc1_tx1", "enc1_rx",
+		     "enc2_tx0", "enc2_tx1", "enc2_rx";
+	mboxes = <&mu1_m0 0 0
+		  &mu1_m0 0 1
+		  &mu1_m0 1 0
+		  &mu2_m0 0 0
+		  &mu2_m0 0 1
+		  &mu2_m0 1 0>;
+	status = "okay";
+
+	vpu_enc_core0: core0@1020000 {
+		compatible = "fsl,imx8-mu1-vpu-m0";
+		reg = <0x1020000 0x20000>;
+		reg-csr = <0x1090000 0x10000>;
+		interrupts = <GIC_SPI 473 IRQ_TYPE_LEVEL_HIGH>;
+		fsl,vpu_ap_mu_id = <17>;
+		fw-buf-size = <0x200000>;
+		rpc-buf-size = <0x80000>;
+		print-buf-size = <0x80000>;
+	};
+
+	vpu_enc_core1: core1@1040000 {
+		compatible = "fsl,imx8-mu2-vpu-m0";
+		reg = <0x1040000 0x20000>;
+		reg-csr = <0x10A0000 0x10000>;
+		interrupts = <GIC_SPI 474 IRQ_TYPE_LEVEL_HIGH>;
+		fsl,vpu_ap_mu_id = <18>;
+		fw-buf-size = <0x200000>;
+		rpc-buf-size = <0x80000>;
+		print-buf-size = <0x80000>;
+	};
+};
+
+
+/* -------------------- SMARC Buttons ------------------ */
+/ {
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_gpio_keys>;
+
+		// KEY_POWER handled via SCU and sc_pwrkey
+
+		sleep {
+			label = "Sleep Button";
+			gpios = <&lsio_gpio2 17 GPIO_ACTIVE_LOW>;
+			wakeup-source;
+			linux,code = <KEY_SLEEP>;
+		};
+
+		lid {
+			label = "Lid Switch";
+			gpios = <&lsio_gpio2 16 GPIO_ACTIVE_LOW>;
+			wakeup-source;
+			linux,code = <SW_LID>;
+			linux,input-type = <EV_SW>;
+		};
+	};
+};
+
+&iomuxc {
+	pinctrl_gpio_keys: gpio_keysgrp {
+		fsl,pins = <
+			IMX8QM_SPI3_SCK_LSIO_GPIO2_IO17         0x00000021   /* SLEEP_BTN: SMARC S149 */
+			IMX8QM_SPDIF0_EXT_CLK_LSIO_GPIO2_IO16   0x00000021   /* LID_BTN: SMARC S148 */
+		>;
+	};
+};
