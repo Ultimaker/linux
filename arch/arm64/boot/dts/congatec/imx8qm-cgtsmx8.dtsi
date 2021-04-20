@@ -262,6 +262,12 @@
 				<&pd IMX_SC_R_M4_1_MU_1A>;
 	};
 
+
+	aliases {
+		rtc0 = &rtc_ext; /* Use external I2C RTC M4162 as rtc0 */
+		rtc1 = &rtc;     /* And the internal one as rtc1 */
+	};
+
 };
 
 
