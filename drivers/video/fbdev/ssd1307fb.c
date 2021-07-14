@@ -44,7 +44,7 @@
 
 #define MAX_CONTRAST 255
 
-#define REFRESHRATE 1
+#define REFRESHRATE 15
 
 static u_int refreshrate = REFRESHRATE;
 module_param(refreshrate, uint, 0);
