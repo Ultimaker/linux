@@ -8,6 +8,7 @@
 
 #include <linux/backlight.h>
 #include <linux/delay.h>
+#include <linux/device.h>
 #include <linux/fb.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
@@ -43,7 +44,7 @@
 
 #define MAX_CONTRAST 255
 
-#define REFRESHRATE 1
+#define REFRESHRATE 15
 
 static u_int refreshrate = REFRESHRATE;
 module_param(refreshrate, uint, 0);
@@ -76,6 +77,7 @@ struct ssd1307fb_par {
 	struct pwm_device *pwm;
 	u32 pwm_period;
 	struct gpio_desc *reset;
+	bool no_clear_on_probe;
 	struct regulator *vbat_reg;
 	u32 seg_remap;
 	u32 vcomh;
@@ -123,7 +125,7 @@ static int ssd1307fb_write_array(struct i2c_client *client,
 
 	ret = i2c_master_send(client, (u8 *)array, len);
 	if (ret != len) {
-		dev_err(&client->dev, "Couldn't send I2C command.\n");
+		dev_err_ratelimited(&client->dev, "couldn't send I2C command\n");
 		return ret;
 	}
 
@@ -248,6 +250,65 @@ static int ssd1307fb_blank(int blank_mode, struct fb_info *info)
 		return ssd1307fb_write_cmd(par->client, SSD1307FB_DISPLAY_ON);
 }
 
+static int ssd1307fb_set_par(struct fb_info *info)
+{
+	struct ssd1307fb_par *par = info->par;
+	int ret;
+  u32 com_invdir;
+
+	/* Set segment re-map */
+	if (par->seg_remap) {
+		ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SEG_REMAP_ON);
+		if (ret < 0)
+			return ret;
+	};
+
+	/* Set COM direction */
+	com_invdir = 0xc0 | (par->com_invdir & 0x1) << 3;
+	ret = ssd1307fb_write_cmd(par->client,  com_invdir);
+	if (ret < 0)
+		return ret;
+
+	/* Switch to horizontal addressing mode */
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_ADDRESS_MODE);
+	if (ret < 0)
+		return ret;
+
+	ret = ssd1307fb_write_cmd(par->client,
+				  SSD1307FB_SET_ADDRESS_MODE_HORIZONTAL);
+	if (ret < 0)
+		return ret;
+
+	/* Set column range */
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_COL_RANGE);
+	if (ret < 0)
+		return ret;
+
+	ret = ssd1307fb_write_cmd(par->client, 0x0);
+	if (ret < 0)
+		return ret;
+
+	ret = ssd1307fb_write_cmd(par->client, par->width - 1);
+	if (ret < 0)
+		return ret;
+
+	/* Set page range */
+	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_PAGE_RANGE);
+	if (ret < 0)
+		return ret;
+
+	ret = ssd1307fb_write_cmd(par->client, 0x0);
+	if (ret < 0)
+		return ret;
+
+	ret = ssd1307fb_write_cmd(par->client,
+				  par->page_offset + (par->height / 8) - 1);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
 static void ssd1307fb_fillrect(struct fb_info *info, const struct fb_fillrect *rect)
 {
 	struct ssd1307fb_par *par = info->par;
@@ -274,6 +335,7 @@ static struct fb_ops ssd1307fb_ops = {
 	.fb_read	= fb_sys_read,
 	.fb_write	= ssd1307fb_write,
 	.fb_blank	= ssd1307fb_blank,
+	.fb_set_par	= ssd1307fb_set_par,
 	.fb_fillrect	= ssd1307fb_fillrect,
 	.fb_copyarea	= ssd1307fb_copyarea,
 	.fb_imageblit	= ssd1307fb_imageblit,
@@ -290,11 +352,13 @@ static int ssd1307fb_init(struct ssd1307fb_par *par)
 	int ret;
 	u32 precharge, dclk, com_invdir, compins;
 	struct pwm_args pargs;
+	char status;
+	struct device *dev = &par->client->dev;
 
 	if (par->device_info->need_pwm) {
-		par->pwm = pwm_get(&par->client->dev, NULL);
+		par->pwm = pwm_get(dev, NULL);
 		if (IS_ERR(par->pwm)) {
-			dev_err(&par->client->dev, "Could not get PWM from device tree!\n");
+			dev_err(dev, "could not get PWM from device tree\n");
 			return PTR_ERR(par->pwm);
 		}
 
@@ -311,9 +375,16 @@ static int ssd1307fb_init(struct ssd1307fb_par *par)
 		pwm_config(par->pwm, par->pwm_period / 2, par->pwm_period);
 		pwm_enable(par->pwm);
 
-		dev_dbg(&par->client->dev, "Using PWM%d with a %dns period.\n",
+		dev_dbg(dev, "using PWM%d with a %dns period\n",
 			par->pwm->pwm, par->pwm_period);
 	};
+
+	/* Check if we can talk to the display */
+	ret = i2c_master_recv(par->client, &status, 1);
+	if (ret < 0) {
+		dev_err(dev, "controller not found\n");
+		return ret;
+	}
 
 	/* Set initial contrast */
 	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_CONTRAST);
@@ -405,45 +476,9 @@ static int ssd1307fb_init(struct ssd1307fb_par *par)
 	if (ret < 0)
 		return ret;
 
-	/* Switch to horizontal addressing mode */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_ADDRESS_MODE);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client,
-				  SSD1307FB_SET_ADDRESS_MODE_HORIZONTAL);
-	if (ret < 0)
-		return ret;
-
-	/* Set column range */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_COL_RANGE);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, 0x0);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, par->width - 1);
-	if (ret < 0)
-		return ret;
-
-	/* Set page range */
-	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_SET_PAGE_RANGE);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client, 0x0);
-	if (ret < 0)
-		return ret;
-
-	ret = ssd1307fb_write_cmd(par->client,
-				  par->page_offset + (par->height / 8) - 1);
-	if (ret < 0)
-		return ret;
-
 	/* Clear the screen */
-	ssd1307fb_update_display(par);
+	if (!par->no_clear_on_probe)
+		ssd1307fb_update_display(par);
 
 	/* Turn on the display */
 	ret = ssd1307fb_write_cmd(par->client, SSD1307FB_DISPLAY_ON);
@@ -547,6 +582,7 @@ static int ssd1307fb_probe(struct i2c_client *client,
 	struct fb_deferred_io *ssd1307fb_defio;
 	u32 vmem_size;
 	struct ssd1307fb_par *par;
+  struct fb_of_properties prop;
 	u8 *vmem;
 	int ret;
 
@@ -588,7 +624,10 @@ static int ssd1307fb_probe(struct i2c_client *client,
 		}
 	}
 
-	if (of_property_read_u32(node, "solomon,width", &par->width))
+  fb_parse_properties(&client->dev, &prop);
+  par->no_clear_on_probe = prop.no_clear_on_probe;
+
+  if (of_property_read_u32(node, "solomon,width", &par->width))
 		par->width = 96;
 
 	if (of_property_read_u32(node, "solomon,height", &par->height))
@@ -685,6 +724,12 @@ static int ssd1307fb_probe(struct i2c_client *client,
 	if (ret)
 		goto regulator_enable_error;
 
+	ret = ssd1307fb_set_par(info);
+	if (ret) {
+		dev_err(&client->dev, "unable to setup parameters\n");
+		goto bl_init_error;
+	}
+
 	ret = register_framebuffer(info);
 	if (ret) {
 		dev_err(&client->dev, "Couldn't register the framebuffer\n");
@@ -748,10 +793,10 @@ static int ssd1307fb_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id ssd1307fb_i2c_id[] = {
-	{ "ssd1305fb", 0 },
-	{ "ssd1306fb", 0 },
-	{ "ssd1307fb", 0 },
-	{ "ssd1309fb", 0 },
+	{ "ssd1305fb-i2c", 0 },
+	{ "ssd1306fb-i2c", 0 },
+	{ "ssd1307fb-i2c", 0 },
+	{ "ssd1309fb-i2c", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ssd1307fb_i2c_id);
