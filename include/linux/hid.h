@@ -1138,4 +1138,7 @@ do {									\
 #define hid_dbg(hid, fmt, arg...)			\
 	dev_dbg(&(hid)->dev, fmt, ##arg)
 
+#define hid_warn_once(hid, fmt, arg...)        \
+    dev_warn_once(&(hid)->dev, fmt, ##arg)
+
 #endif
