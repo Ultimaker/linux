@@ -51,7 +51,7 @@ CONFIG_SDIO_HCI = n
 CONFIG_GSPI_HCI = n
 ########################## Features ###########################
 CONFIG_MP_INCLUDED = y
-CONFIG_POWER_SAVING = y
+CONFIG_POWER_SAVING = n
 CONFIG_IPS_MODE = default
 CONFIG_LPS_MODE = default
 CONFIG_USB_AUTOSUSPEND = n
@@ -102,7 +102,7 @@ endif
 CONFIG_RTW_DEBUG = y
 # default log level is _DRV_INFO_ = 4,
 # please refer to "How_to_set_driver_debug_log_level.doc" to set the available level.
-CONFIG_RTW_LOG_LEVEL = 4
+CONFIG_RTW_LOG_LEVEL = 3
 
 # enable /proc/net/rtlxxxx/ debug interfaces
 CONFIG_PROC_DEBUG = y
@@ -1807,7 +1807,8 @@ EXTRA_CFLAGS += -DCONFIG_LITTLE_ENDIAN
 EXTRA_CFLAGS += -DCONFIG_PLATFORM_ARM_SUN7I
 EXTRA_CFLAGS += -DCONFIG_TRAFFIC_PROTECT
 # default setting for Android 4.1, 4.2, 4.3, 4.4
-EXTRA_CFLAGS += -DCONFIG_CONCURRENT_MODE
+#EXTRA_CFLAGS += -DCONFIG_CONCURRENT_MODE
+EXTRA_CFLAGS += -DCONFIG_IOL
 EXTRA_CFLAGS += -DCONFIG_IOCTL_CFG80211 -DRTW_USE_CFG80211_STA_EVENT
 EXTRA_CFLAGS +=  -DCONFIG_QOS_OPTIMIZATION
 

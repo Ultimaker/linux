@@ -12260,10 +12260,7 @@ static const struct iw_priv_args rtw_private_args[] = {
 	{ MP_SD_IREAD, IW_PRIV_TYPE_CHAR | 1024, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "sd_iread" },
 	{ MP_SD_IWRITE, IW_PRIV_TYPE_CHAR | 1024, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "sd_iwrite" },
 #endif
-};
 
-
-static const struct iw_priv_args rtw_mp_private_args[] = {
 	/* --- sub-ioctls definitions --- */
 #ifdef CONFIG_MP_INCLUDED
 	{ MP_START , IW_PRIV_TYPE_CHAR | 1024, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_start" },
@@ -12317,6 +12314,12 @@ static const struct iw_priv_args rtw_mp_private_args[] = {
 	{ MP_DPK_TRK, IW_PRIV_TYPE_CHAR | 1024, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_dpk_trk" },
 	{ MP_GET_TSSIDE, IW_PRIV_TYPE_CHAR | 1024, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_get_tsside" },
 	{ MP_SET_TSSIDE, IW_PRIV_TYPE_CHAR | 1024, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "mp_set_tsside" },
+#endif /* CONFIG_MP_INCLUDED */
+};
+
+
+static const struct iw_priv_args rtw_mp_private_args[] = {
+#ifdef CONFIG_MP_INCLUDED
 #ifdef CONFIG_RTW_CUSTOMER_STR
 	{ MP_CUSTOMER_STR, IW_PRIV_TYPE_CHAR | 1024, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, "customer_str" },
 #endif

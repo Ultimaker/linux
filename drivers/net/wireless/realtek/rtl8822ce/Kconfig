@@ -1,6 +1,10 @@
 config RTL8822CE
 	tristate "Realtek 8822C PCIE WiFi"
 	depends on PCI
+	depends on WLAN && CFG80211
+	select WIRELESS_EXT
+	select WEXT_PRIV
 	---help---
 	  Help message of RTL8822CE
+
 
