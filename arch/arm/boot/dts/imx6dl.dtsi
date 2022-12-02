@@ -87,7 +87,7 @@
 			};
 		};
 
-		aips2: aips-bus@2100000 {
+		aips2: bus@2100000 {
 			i2c4: i2c@21f8000 {
 				#address-cells = <1>;
 				#size-cells = <0>;
