@@ -201,6 +201,7 @@ struct ti_sn65dsi86 {
 	bool 				mode_valid;
 	bool				enabled;
 	struct edid			dbg_edid;
+	bool 				pm_suspended;
 #endif
 
 #if defined(CONFIG_OF_GPIO)
@@ -745,7 +746,7 @@ static void ti_sn_enable_DP(struct ti_sn65dsi86 *pdata)
 /****************************************************************************************/
 /* PM */
 
-static int __maybe_unused ti_sn65dsi86_resume(struct device *dev)
+static int __maybe_unused ti_sn65dsi86_runtime_resume(struct device *dev)
 {
 	struct ti_sn65dsi86 *pdata = dev_get_drvdata(dev);
 	int ret;
@@ -768,13 +769,15 @@ static int __maybe_unused ti_sn65dsi86_resume(struct device *dev)
 	 * pre_enable(). Without a reference clock we need the MIPI reference
 	 * clock so reading early doesn't work.
 	 */
-	if (pdata->refclk)
+	if (pdata->refclk) {
 		ti_sn65dsi86_enable_comms(pdata);
+		usleep_range(300,310);
+	}
 
 	return ret;
 }
 
-static int __maybe_unused ti_sn65dsi86_suspend(struct device *dev)
+static int __maybe_unused ti_sn65dsi86_runtime_suspend(struct device *dev)
 {
 	struct ti_sn65dsi86 *pdata = dev_get_drvdata(dev);
 	int ret;
@@ -791,10 +794,32 @@ static int __maybe_unused ti_sn65dsi86_suspend(struct device *dev)
 	return ret;
 }
 
+static int __maybe_unused ti_sn65dsi86_resume(struct device *dev)
+{
+	struct ti_sn65dsi86 *pdata = dev_get_drvdata(dev);
+
+	if (!pm_runtime_enabled(dev) || (!pm_runtime_suspended(dev) && pdata->pm_suspended)) {
+		ti_sn65dsi86_runtime_resume(dev);
+	}
+
+	return 0;
+}
+
+static int __maybe_unused ti_sn65dsi86_suspend(struct device *dev)
+{
+	struct ti_sn65dsi86 *pdata = dev_get_drvdata(dev);
+
+	if (!pm_runtime_enabled(dev) || !pm_runtime_suspended(dev)) {
+		ti_sn65dsi86_runtime_suspend(dev);
+	}
+	pdata->pm_suspended = true;
+	return 0;
+}
+
+
 static const struct dev_pm_ops ti_sn65dsi86_pm_ops = {
-	SET_RUNTIME_PM_OPS(ti_sn65dsi86_suspend, ti_sn65dsi86_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	SET_RUNTIME_PM_OPS(ti_sn65dsi86_runtime_suspend, ti_sn65dsi86_runtime_resume, NULL)
+	SET_SYSTEM_SLEEP_PM_OPS(ti_sn65dsi86_suspend, ti_sn65dsi86_resume)
 };
 
 /****************************************************************************************/
@@ -1382,9 +1407,10 @@ ti_sn_bridge_connector_detect(struct drm_connector *connector, bool force)
 		/* if not enabled - enable and read HPD */
 		pm_runtime_get_sync(pdata->dev);
 
-		/* configure bridge ref_clk */
-		ti_sn65dsi86_enable_comms(pdata);
-
+		if (pdata->pm_suspended) {
+			// call resume anyway
+			ti_sn65dsi86_runtime_resume(pdata->dev);
+		}
 		/* enable HPD LINE */
 		regmap_update_bits(pdata->regmap, SN_HPDLINE_REG, HPD_DISABLE, 0);
 		/* wait for debounce */
@@ -1394,6 +1420,10 @@ ti_sn_bridge_connector_detect(struct drm_connector *connector, bool force)
 		pdata->plugged = ((val & HPD_LINE_STATUS) != 0);
 
 		ti_sn65dsi86_disable_comms(pdata);
+		if (pdata->pm_suspended) {
+			// call resume anyway
+			ti_sn65dsi86_runtime_suspend(pdata->dev);
+		}
 		pm_runtime_put_sync(pdata->dev);
 
 		// ti_sn_dbg_connector_status(pdata, false);
@@ -1599,8 +1629,8 @@ static void ti_sn_bridge_enable(struct drm_bridge *bridge)
 
 	ret = ti_sn_enable_line(pdata);
 	if (ret) {
-		ti_sn_bridge_disable(bridge);
-		return;
+		disable_irq_nosync(pdata->hpd_irq);
+		mod_delayed_work(system_wq, &pdata->mw, msecs_to_jiffies(300));
 	}
 
 	/* config video parameters */
@@ -1715,6 +1745,11 @@ static void ti_sn_bridge_pre_enable(struct drm_bridge *bridge)
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
 
 	pm_runtime_get_sync(pdata->dev);
+	if (pdata->pm_suspended) {
+		// call resume anyway
+		ti_sn65dsi86_runtime_resume(pdata->dev);
+		pdata->pm_suspended = false;
+	}
 
 	if (!pdata->refclk)
 		ti_sn65dsi86_enable_comms(pdata);
