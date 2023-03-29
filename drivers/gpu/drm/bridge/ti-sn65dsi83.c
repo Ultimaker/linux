@@ -144,6 +144,7 @@ struct sn65dsi83 {
 	struct drm_bridge		*panel_bridge;
 	struct gpio_desc		*enable_gpio;
 	int				dsi_lanes;
+	unsigned int			dsi_freq;
 	bool				lvds_dual_link;
 	bool				lvds_dual_link_even_odd_swap;
 };
@@ -272,7 +273,11 @@ static int sn65dsi83_attach(struct drm_bridge *bridge,
 
 	dsi->lanes = ctx->dsi_lanes;
 	dsi->format = MIPI_DSI_FMT_RGB888;
-	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST;
+	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_SYNC_PULSE | MIPI_DSI_MODE_VIDEO_NO_HFP |
+	                  MIPI_DSI_MODE_VIDEO_AUTO_VERT;
+
+	ctx->dsi_freq = 0;
+	dsi->export_dsi_freq = &(ctx->dsi_freq);
 
 	ret = mipi_dsi_attach(dsi);
 	if (ret < 0) {
@@ -304,6 +309,23 @@ static void sn65dsi83_atomic_pre_enable(struct drm_bridge *bridge,
 	usleep_range(1000, 1100);
 }
 
+static u8 sn65dsi83_get_dsi_div(struct sn65dsi83 *ctx, const struct drm_display_mode *mode)
+{
+	unsigned int pixdiv, pix_freq;
+	unsigned int sndiv = 25; /* MAX_DSI_DIVIDER */
+
+	pixdiv = DIV_ROUND_CLOSEST(594000, mode->clock);
+	pix_freq = 594000 / pixdiv;
+
+	while ( ( ( ctx->dsi_freq / sndiv ) < pix_freq ) && ( sndiv > 0 ) )
+		sndiv--;
+
+	if (ctx->lvds_dual_link)
+		sndiv<<=1;
+
+	return sndiv;
+}
+
 static u8 sn65dsi83_get_lvds_range(struct sn65dsi83 *ctx,
 				   const struct drm_display_mode *mode)
 {
@@ -321,12 +343,9 @@ static u8 sn65dsi83_get_lvds_range(struct sn65dsi83 *ctx,
 	 * the clock to 25..154 MHz, the range calculation can be simplified
 	 * as follows:
 	 */
-	int mode_clock = mode->clock;
+	unsigned int lvdsclock_khz = ctx->dsi_freq / sn65dsi83_get_dsi_div(ctx, mode);
 
-	if (ctx->lvds_dual_link)
-		mode_clock /= 2;
-
-	return (mode_clock - 12500) / 25000;
+	return (lvdsclock_khz - 12500) / 25000;
 }
 
 static u8 sn65dsi83_get_dsi_range(struct sn65dsi83 *ctx,
@@ -346,22 +365,8 @@ static u8 sn65dsi83_get_dsi_range(struct sn65dsi83 *ctx,
 	 *  DSI_CLK = mode clock * bpp / dsi_data_lanes / 2
 	 * the 2 is there because the bus is DDR.
 	 */
-	return DIV_ROUND_UP(clamp((unsigned int)mode->clock *
-			    mipi_dsi_pixel_format_to_bpp(ctx->dsi->format) /
-			    ctx->dsi_lanes / 2, 40000U, 500000U), 5000U);
-}
 
-static u8 sn65dsi83_get_dsi_div(struct sn65dsi83 *ctx)
-{
-	/* The divider is (DSI_CLK / LVDS_CLK) - 1, which really is: */
-	unsigned int dsi_div = mipi_dsi_pixel_format_to_bpp(ctx->dsi->format);
-
-	dsi_div /= ctx->dsi_lanes;
-
-	if (!ctx->lvds_dual_link)
-		dsi_div /= 2;
-
-	return dsi_div - 1;
+	return ctx->dsi_freq / 5000U;
 }
 
 static void sn65dsi83_atomic_enable(struct drm_bridge *bridge,
@@ -432,7 +437,7 @@ static void sn65dsi83_atomic_enable(struct drm_bridge *bridge,
 	regmap_write(ctx->regmap, REG_DSI_CLK,
 		     REG_DSI_CLK_CHA_DSI_CLK_RANGE(sn65dsi83_get_dsi_range(ctx, mode)));
 	regmap_write(ctx->regmap, REG_RC_DSI_CLK,
-		     REG_RC_DSI_CLK_DSI_CLK_DIVIDER(sn65dsi83_get_dsi_div(ctx)));
+		     REG_RC_DSI_CLK_DSI_CLK_DIVIDER(sn65dsi83_get_dsi_div(ctx, mode) - 1 ));
 
 	/* Set number of DSI lanes and LVDS link config. */
 	regmap_write(ctx->regmap, REG_DSI_LANE,
@@ -485,14 +490,20 @@ static void sn65dsi83_atomic_enable(struct drm_bridge *bridge,
 	/* 32 + 1 pixel clock to ensure proper operation */
 	le16val = cpu_to_le16(32 + 1);
 	regmap_bulk_write(ctx->regmap, REG_VID_CHA_SYNC_DELAY_LOW, &le16val, 2);
-	le16val = cpu_to_le16(mode->hsync_end - mode->hsync_start);
+	le16val = cpu_to_le16( ctx->lvds_dual_link
+			? ((mode->hsync_end - mode->hsync_start) >> 1)
+			: (mode->hsync_end - mode->hsync_start)
+			  );
 	regmap_bulk_write(ctx->regmap, REG_VID_CHA_HSYNC_PULSE_WIDTH_LOW,
 			  &le16val, 2);
 	le16val = cpu_to_le16(mode->vsync_end - mode->vsync_start);
 	regmap_bulk_write(ctx->regmap, REG_VID_CHA_VSYNC_PULSE_WIDTH_LOW,
 			  &le16val, 2);
 	regmap_write(ctx->regmap, REG_VID_CHA_HORIZONTAL_BACK_PORCH,
-		     mode->htotal - mode->hsync_end);
+					ctx->lvds_dual_link
+					? (mode->htotal - mode->hsync_end) >> 1
+					: (mode->htotal - mode->hsync_end)
+				  );
 	regmap_write(ctx->regmap, REG_VID_CHA_VERTICAL_BACK_PORCH,
 		     mode->vtotal - mode->vsync_end);
 	regmap_write(ctx->regmap, REG_VID_CHA_HORIZONTAL_FRONT_PORCH,

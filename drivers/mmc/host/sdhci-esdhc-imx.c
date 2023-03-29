@@ -1831,7 +1831,8 @@ static int sdhci_esdhc_suspend(struct device *dev)
 	if (ret)
 		return ret;
 
-	ret = mmc_gpio_set_cd_wake(host->mmc, true);
+	ret = mmc_gpio_set_cd_wake(host->mmc, false);
+	//ret = mmc_gpio_set_cd_wake(host->mmc, true);
 
 	pm_runtime_disable(dev);
 	pm_runtime_set_suspended(dev);

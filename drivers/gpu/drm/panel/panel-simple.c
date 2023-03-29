@@ -183,7 +183,7 @@ struct panel_simple {
 	ktime_t prepared_time;
 	ktime_t unprepared_time;
 
-	const struct panel_desc *desc;
+	struct panel_desc *desc;
 
 	struct regulator *supply;
 	struct i2c_adapter *ddc;
@@ -342,20 +342,6 @@ static int panel_simple_disable(struct drm_panel *panel)
 	return 0;
 }
 
-static int panel_simple_suspend(struct device *dev)
-{
-	struct panel_simple *p = dev_get_drvdata(dev);
-
-	gpiod_set_value_cansleep(p->enable_gpio, 0);
-	regulator_disable(p->supply);
-	p->unprepared_time = ktime_get();
-
-	kfree(p->edid);
-	p->edid = NULL;
-
-	return 0;
-}
-
 static int panel_simple_unprepare(struct drm_panel *panel)
 {
 	struct panel_simple *p = to_panel_simple(panel);
@@ -369,7 +355,18 @@ static int panel_simple_unprepare(struct drm_panel *panel)
 	ret = pm_runtime_put_autosuspend(panel->dev);
 	if (ret < 0)
 		return ret;
+
+	panel_simple_wait(ktime_get(), p->desc->delay.unprepare);
+
+	gpiod_set_value_cansleep(p->enable_gpio, 0);
+	regulator_disable(p->supply);
+
 	p->prepared = false;
+
+	p->unprepared_time = ktime_get();
+
+	kfree(p->edid);
+	p->edid = NULL;
 
 	return 0;
 }
@@ -453,30 +450,11 @@ error:
  */
 #define MAX_PANEL_PREPARE_TRIES		5
 
-static int panel_simple_resume(struct device *dev)
-{
-	struct panel_simple *p = dev_get_drvdata(dev);
-	int ret;
-	int try;
-
-	for (try = 0; try < MAX_PANEL_PREPARE_TRIES; try++) {
-		ret = panel_simple_prepare_once(p);
-		if (ret != -ETIMEDOUT)
-			break;
-	}
-
-	if (ret == -ETIMEDOUT)
-		dev_err(dev, "Prepare timeout after %d tries\n", try);
-	else if (try)
-		dev_warn(dev, "Prepare needed %d retries\n", try);
-
-	return ret;
-}
-
 static int panel_simple_prepare(struct drm_panel *panel)
 {
 	struct panel_simple *p = to_panel_simple(panel);
 	int ret;
+	int try;
 
 	/* Preparing when already prepared is a no-op */
 	if (p->prepared)
@@ -487,6 +465,21 @@ static int panel_simple_prepare(struct drm_panel *panel)
 		pm_runtime_put_autosuspend(panel->dev);
 		return ret;
 	}
+
+	for (try = 0; try < MAX_PANEL_PREPARE_TRIES; try++) {
+		ret = panel_simple_prepare_once(p);
+		if (ret != -ETIMEDOUT)
+			break;
+	}
+
+	if (ret == -ETIMEDOUT)
+	{
+		pm_runtime_put_autosuspend(panel->dev);
+		dev_err(panel->dev, "Prepare timeout after %d tries\n", try);
+		return ret;
+	}
+	else if (try)
+		dev_warn(panel->dev, "Prepare needed %d retries\n", try);
 
 	p->prepared = true;
 
@@ -622,7 +615,7 @@ static void panel_simple_parse_panel_timing_node(struct device *dev,
 {
 	const struct panel_desc *desc = panel->desc;
 	struct videomode vm;
-	unsigned int i;
+	/* unsigned int i; */
 
 	if (WARN_ON(desc->num_modes)) {
 		dev_err(dev, "Reject override mode: panel has a fixed mode\n");
@@ -633,7 +626,7 @@ static void panel_simple_parse_panel_timing_node(struct device *dev,
 		return;
 	}
 
-	for (i = 0; i < panel->desc->num_timings; i++) {
+	/*for (i = 0; i < panel->desc->num_timings; i++) {
 		const struct display_timing *dt = &panel->desc->timings[i];
 
 		if (!PANEL_SIMPLE_BOUNDS_CHECK(ot, dt, hactive) ||
@@ -654,7 +647,13 @@ static void panel_simple_parse_panel_timing_node(struct device *dev,
 		panel->override_mode.type |= DRM_MODE_TYPE_DRIVER |
 					     DRM_MODE_TYPE_PREFERRED;
 		break;
-	}
+	}*/
+
+	/* Do not check the override mode against the fallback */
+	videomode_from_timing(ot, &vm);
+	drm_display_mode_from_videomode(&vm, &panel->override_mode);
+	panel->override_mode.type |= DRM_MODE_TYPE_DRIVER |
+		     	 	 	 DRM_MODE_TYPE_PREFERRED;
 
 	if (WARN_ON(!panel->override_mode.type))
 		dev_err(dev, "Reject override mode: No display_timing found\n");
@@ -669,6 +668,8 @@ static int panel_simple_probe(struct device *dev, const struct panel_desc *desc,
 	int connector_type;
 	u32 bus_flags;
 	int err;
+	const char *mapping;
+	int ret;
 
 	panel = devm_kzalloc(dev, sizeof(*panel), GFP_KERNEL);
 	if (!panel)
@@ -676,7 +677,8 @@ static int panel_simple_probe(struct device *dev, const struct panel_desc *desc,
 
 	panel->enabled = false;
 	panel->prepared_time = 0;
-	panel->desc = desc;
+	panel->unprepared_time = 0;
+	panel->desc = (struct panel_desc *) desc;
 	panel->aux = aux;
 
 	panel->no_hpd = of_property_read_bool(dev->of_node, "no-hpd");
@@ -705,6 +707,23 @@ static int panel_simple_probe(struct device *dev, const struct panel_desc *desc,
 		return err;
 	}
 
+	ret = of_property_read_string(dev->of_node, "data-mapping", &mapping);
+
+	if (ret >= 0) {
+
+		if (!strcmp(mapping, "spwg-18")) {
+			panel->desc->bus_format = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG;
+		} else if (!strcmp(mapping, "jeida-24")) {
+			panel->desc->bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA;
+		} else if (!strcmp(mapping, "spwg-24")) {
+			panel->desc->bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG;
+		} else {
+			dev_err(dev, "%pOF: invalid %s DT property\n",
+					dev->of_node, "data-mapping");
+			return -EINVAL;
+		}
+	}
+
 	ddc = of_parse_phandle(dev->of_node, "ddc-i2c-bus", 0);
 	if (ddc) {
 		panel->ddc = of_find_i2c_adapter_by_node(ddc);
@@ -712,6 +731,8 @@ static int panel_simple_probe(struct device *dev, const struct panel_desc *desc,
 
 		if (!panel->ddc)
 			return -EPROBE_DEFER;
+
+
 	} else if (aux) {
 		panel->ddc = &aux->ddc;
 	}
@@ -826,9 +847,10 @@ static int panel_simple_remove(struct device *dev)
 {
 	struct panel_simple *panel = dev_get_drvdata(dev);
 
-	drm_panel_remove(&panel->base);
-	drm_panel_disable(&panel->base);
-	drm_panel_unprepare(&panel->base);
+	/* drm_panel_remove(&panel->base);
+	   drm_panel_disable(&panel->base);
+	   drm_panel_unprepare(&panel->base);
+	 */
 
 	pm_runtime_dont_use_autosuspend(dev);
 	pm_runtime_disable(dev);
@@ -845,6 +867,46 @@ static void panel_simple_shutdown(struct device *dev)
 	drm_panel_disable(&panel->base);
 	drm_panel_unprepare(&panel->base);
 }
+
+static const struct display_timing sx8m_fallback_timing = {
+	.pixelclock = { 65002600, 65002600, 65002600 },
+	.hactive = { 1024, 1024, 1024 },
+	.hfront_porch = { 24, 24, 24 },
+	.hback_porch = { 160, 160, 160 },
+	.hsync_len = { 136, 136, 136 },
+	.vactive = { 768, 768, 768 },
+	.vfront_porch = { 3, 3, 3 },
+	.vback_porch = { 29, 29, 29 },
+	.vsync_len = { 6, 6, 6 },
+	.flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
+		DISPLAY_FLAGS_DE_LOW
+};
+
+static const struct panel_desc cgt_sx8m_lvds_panel = {
+	.timings = &sx8m_fallback_timing,
+	.num_timings = 1,
+	.bpc = 8,
+	.size = {
+		.width = 1024,
+		.height = 768,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG,
+	.delay.prepare = 30,
+	.delay.enable = 200,
+	.delay.unprepare = 20,
+	.delay.disable = 200,
+};
+
+static const struct panel_desc cgt_sx8m_dp_display = {
+	.timings = &sx8m_fallback_timing,
+	.num_timings = 1,
+	.bpc = 8,
+	.size = {
+		.width = 1024,
+		.height = 768,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
+};
 
 static const struct drm_display_mode ampire_am_1280800n3tzqw_t00h_mode = {
 	.clock = 71100,
@@ -4504,6 +4566,12 @@ static const struct panel_desc arm_rtsm = {
 
 static const struct of_device_id platform_of_match[] = {
 	{
+		.compatible = "cgt,sx8m-lvds",
+		.data = &cgt_sx8m_lvds_panel,
+	}, {
+		.compatible = "cgt,sx8m-dp",
+		.data = &cgt_sx8m_dp_display,
+	}, {
 		.compatible = "ampire,am-1280800n3tzqw-t00h",
 		.data = &ampire_am_1280800n3tzqw_t00h,
 	}, {
@@ -4967,15 +5035,11 @@ static int panel_simple_platform_remove(struct platform_device *pdev)
 	return panel_simple_remove(&pdev->dev);
 }
 
-static void panel_simple_platform_shutdown(struct platform_device *pdev)
-{
-	panel_simple_shutdown(&pdev->dev);
-}
 
 static const struct dev_pm_ops panel_simple_pm_ops = {
-	SET_RUNTIME_PM_OPS(panel_simple_suspend, panel_simple_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	SET_RUNTIME_PM_OPS(NULL, NULL, NULL)
+	SET_SYSTEM_SLEEP_PM_OPS(NULL,
+				NULL)
 };
 
 static struct platform_driver panel_simple_platform_driver = {
@@ -4986,7 +5050,6 @@ static struct platform_driver panel_simple_platform_driver = {
 	},
 	.probe = panel_simple_platform_probe,
 	.remove = panel_simple_platform_remove,
-	.shutdown = panel_simple_platform_shutdown,
 };
 
 struct panel_desc_dsi {

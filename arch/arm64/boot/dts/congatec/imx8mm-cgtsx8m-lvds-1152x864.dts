@@ -1,0 +1,20 @@
+/dts-v1/;
+
+#include "imx8mm-cgtsx8m-lvds.dtsi"
+
+/ {
+        lvdspanel {
+
+                panel-timing {
+			clock-frequency = <81625990>;
+			hactive = <1152>;
+			vactive = <864>;
+			hsync-len = <120>;
+			hfront-porch = <64>;
+			hback-porch = <184>;
+			vsync-len = <3>;
+			vfront-porch = <1>;
+			vback-porch = <27>;
+                };
+        };
+};

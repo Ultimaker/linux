@@ -587,6 +587,12 @@ static void imx6_pcie_detach_pd(struct device *dev)
 	imx6_pcie->pd_per_link = NULL;
 	imx6_pcie->pd_pcie = NULL;
 	imx6_pcie->pd_link = NULL;
+
+	/* Set reset low, to enable board suspend */
+	if (gpio_is_valid(imx6_pcie->reset_gpio)) {
+		gpio_set_value_cansleep(imx6_pcie->reset_gpio,
+					imx6_pcie->gpio_active_high);
+	}
 }
 
 static int imx6_pcie_attach_pd(struct device *dev)
@@ -973,6 +979,8 @@ static void imx6_pcie_clk_disable(struct imx6_pcie *imx6_pcie)
 	case IMX8MM:
 	case IMX8MQ_EP:
 	case IMX8MM_EP:
+		if (imx6_pcie->ext_osc && gpio_is_valid(imx6_pcie->clkreq_gpio))
+			gpio_set_value_cansleep(imx6_pcie->clkreq_gpio, 0);
 		clk_disable_unprepare(imx6_pcie->pcie_aux);
 		break;
 	case IMX8QM:
@@ -1522,6 +1530,8 @@ static void imx6_pcie_init_phy(struct imx6_pcie *imx6_pcie)
 					   IMX8MM_GPR_PCIE_REF_CLK_SEL,
 					   IMX8MM_GPR_PCIE_REF_CLK_EXT);
 			udelay(100);
+			if (gpio_is_valid(imx6_pcie->clkreq_gpio))
+				gpio_set_value_cansleep(imx6_pcie->clkreq_gpio, 1);
 			/* Do the PHY common block reset */
 			regmap_update_bits(imx6_pcie->iomuxc_gpr, offset,
 					   IMX8MM_GPR_PCIE_CMN_RST,
@@ -2177,6 +2187,12 @@ static void imx6_pcie_pm_turnoff(struct imx6_pcie *imx6_pcie)
 	if (imx6_pcie->turnoff_reset) {
 		reset_control_assert(imx6_pcie->turnoff_reset);
 		reset_control_deassert(imx6_pcie->turnoff_reset);
+
+		if (gpio_is_valid(imx6_pcie->reset_gpio)) {
+			gpio_set_value_cansleep(imx6_pcie->reset_gpio,
+						imx6_pcie->gpio_active_high);
+		}
+
 		goto pm_turnoff_sleep;
 	}
 
@@ -2288,6 +2304,7 @@ static int imx6_pcie_resume_noirq(struct device *dev)
 				IMX6Q_GPR1_PCIE_TEST_PD, 0);
 	} else {
 		imx6_pcie_assert_core_reset(imx6_pcie);
+		msleep(100);
 		imx6_pcie_init_phy(imx6_pcie);
 		imx6_pcie_deassert_core_reset(imx6_pcie);
 		dw_pcie_setup_rc(pp);

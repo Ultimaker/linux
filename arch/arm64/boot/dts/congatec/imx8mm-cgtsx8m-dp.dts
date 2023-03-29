@@ -1,0 +1,17 @@
+/dts-v1/;
+
+#include "imx8mm-cgtsx8m.dts"
+
+&i2c4 {
+	dp-bridge@2d {
+		status = "okay";
+	};
+};
+
+&mipi_dsi {
+	status = "okay";
+};
+
+&lcdif {
+        status = "okay";
+};

@@ -305,6 +305,10 @@ static int sec_dsim_of_parse_resets(struct imx_sec_dsim_device *dsim)
 	if (ret)
 		return ret;
 
+
+	if (dsim->soft_resetn)
+		return 0;
+
 	parent = args.np;
 	for_each_child_of_node(parent, child) {
 		compat = of_get_property(child, "compatible", NULL);
@@ -422,10 +426,15 @@ static int imx_sec_dsim_probe(struct platform_device *pdev)
 {
 	int ret;
 	struct device *dev = &pdev->dev;
+	unsigned int not_first_probe = 0;
 
 	dev_dbg(dev, "%s: dsim probe begin\n", __func__);
 
-	dsim_dev = devm_kzalloc(dev, sizeof(*dsim_dev), GFP_KERNEL);
+	if (!dsim_dev)
+		dsim_dev = kzalloc(sizeof(*dsim_dev), GFP_KERNEL);
+	else
+		not_first_probe = 1;
+
 	if (!dsim_dev) {
 		dev_err(dev, "Unable to allocate 'dsim_dev'\n");
 		return -ENOMEM;
@@ -454,7 +463,8 @@ static int imx_sec_dsim_probe(struct platform_device *pdev)
 
 	atomic_set(&dsim_dev->rpm_suspended, 1);
 
-	pm_runtime_enable(dev);
+	if (!not_first_probe)
+		pm_runtime_enable(dev);
 
 	return component_add(dev, &imx_sec_dsim_ops);
 }

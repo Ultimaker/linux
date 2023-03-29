@@ -1046,7 +1046,7 @@ static struct spi_imx_devtype_data imx51_ecspi_devtype_data = {
 	.disable_dma = mx51_disable_dma,
 	.fifo_size = 64,
 	.has_dmamode = true,
-	.dynamic_burst = true,
+	.dynamic_burst = false,
 	.has_slavemode = true,
 	.disable = mx51_ecspi_disable,
 	.devtype = IMX51_ECSPI,
@@ -1373,6 +1373,8 @@ static int spi_imx_calculate_timeout(struct spi_imx_data *spi_imx, int size)
 	return msecs_to_jiffies(2 * timeout * MSEC_PER_SEC);
 }
 
+#define SPI_IMX_REDUCE_FIFO_FACTOR 8
+
 static int spi_imx_dma_transfer(struct spi_imx_data *spi_imx,
 				struct spi_transfer *transfer)
 {
@@ -1387,7 +1389,8 @@ static int spi_imx_dma_transfer(struct spi_imx_data *spi_imx,
 
 	/* Get the right burst length from the last sg to ensure no tail data */
 	bytes_per_word = spi_imx_bytes_per_word(transfer->bits_per_word);
-	for (i = spi_imx->devtype_data->fifo_size / 2; i > 0; i--) {
+	i = (spi_imx->devtype_data->fifo_size / 2 - SPI_IMX_REDUCE_FIFO_FACTOR);
+	for (; i > 0; i--) {
 		if (!(sg_dma_len(last_sg) % (i * bytes_per_word)))
 			break;
 	}

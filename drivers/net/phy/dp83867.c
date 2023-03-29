@@ -24,6 +24,7 @@
 #define MII_DP83867_PHYSTS	0x11
 #define MII_DP83867_MICR	0x12
 #define MII_DP83867_ISR		0x13
+#define DP83867_LEDCR1		0x18
 #define DP83867_CFG2		0x14
 #define DP83867_CFG3		0x1e
 #define DP83867_CTRL		0x1f
@@ -148,6 +149,16 @@
 /* FLD_THR_CFG */
 #define DP83867_FLD_THR_CFG_ENERGY_LOST_THR_MASK	0x7
 
+/* LEDCR1 fields */
+#define DP83867_LEDCR1_LED_0_SEL_MASK		GENMASK(3, 0)
+#define DP83867_LEDCR1_LED_0_SEL_SHIFT		0
+#define DP83867_LEDCR1_LED_1_SEL_MASK		GENMASK(7, 4)
+#define DP83867_LEDCR1_LED_1_SEL_SHIFT		4
+#define DP83867_LEDCR1_LED_2_SEL_MASK		GENMASK(11, 8)
+#define DP83867_LEDCR1_LED_2_SEL_SHIFT		8
+#define DP83867_LEDCR1_LED_GPIO_SEL_MASK	GENMASK(15, 12)
+#define DP83867_LEDCR1_LED_GPIO_SEL_SHIFT	12
+
 enum {
 	DP83867_PORT_MIRROING_KEEP,
 	DP83867_PORT_MIRROING_EN,
@@ -165,6 +176,10 @@ struct dp83867_private {
 	bool set_clk_output;
 	u32 clk_output_sel;
 	bool sgmii_ref_clk_en;
+	int led_0_sel;
+	int led_1_sel;
+	int led_2_sel;
+	int led_gpio_sel;
 };
 
 static int dp83867_ack_interrupt(struct phy_device *phydev)
@@ -603,6 +618,30 @@ static int dp83867_of_init(struct phy_device *phydev)
 		return -EINVAL;
 	}
 
+	ret = of_property_read_u32(of_node, "ti,led_0_sel",
+				   &dp83867->led_0_sel);
+	/* If not set, keep default */
+	if (ret < 0)
+		dp83867->led_0_sel = -1;
+
+	ret = of_property_read_u32(of_node, "ti,led_1_sel",
+				   &dp83867->led_1_sel);
+	/* If not set, keep default */
+	if (ret < 0)
+		dp83867->led_1_sel = -1;
+
+	ret = of_property_read_u32(of_node, "ti,led_2_sel",
+				   &dp83867->led_2_sel);
+	/* If not set, keep default */
+	if (ret < 0)
+		dp83867->led_2_sel = -1;
+
+	ret = of_property_read_u32(of_node, "ti,led_gpio_sel",
+				   &dp83867->led_gpio_sel);
+	/* If not set, keep default */
+	if (ret < 0)
+		dp83867->led_gpio_sel = -1;
+
 	ret = of_property_read_u32(of_node, "rx-fifo-depth",
 				   &dp83867->rx_fifo_depth);
 	if (ret)
@@ -819,6 +858,37 @@ static int dp83867_config_init(struct phy_device *phydev)
 			       mask, val);
 	}
 
+	if ( ( dp83867->led_0_sel + dp83867->led_1_sel + dp83867->led_2_sel	+ dp83867->led_gpio_sel) != -4 )
+	{
+		val = phy_read(phydev, DP83867_LEDCR1);
+
+		if ( dp83867->led_0_sel != -1 )
+		{
+			val &= ~DP83867_LEDCR1_LED_0_SEL_MASK;
+			val |= dp83867->led_0_sel << DP83867_LEDCR1_LED_0_SEL_SHIFT;
+		}
+
+		if ( dp83867->led_1_sel != -1 )
+		{
+			val &= ~DP83867_LEDCR1_LED_1_SEL_MASK;
+			val |= dp83867->led_1_sel << DP83867_LEDCR1_LED_1_SEL_SHIFT;
+		}
+
+		if ( dp83867->led_2_sel != -1 )
+		{
+			val &= ~DP83867_LEDCR1_LED_2_SEL_MASK;
+			val |= dp83867->led_2_sel << DP83867_LEDCR1_LED_2_SEL_SHIFT;
+		}
+
+		if ( dp83867->led_gpio_sel != -1 )
+		{
+			val &= ~DP83867_LEDCR1_LED_GPIO_SEL_MASK;
+			val |= dp83867->led_gpio_sel << DP83867_LEDCR1_LED_GPIO_SEL_SHIFT;
+		}
+
+		phy_write(phydev, DP83867_LEDCR1, val);
+	}
+
 	return 0;
 }
 
@@ -826,7 +896,7 @@ static int dp83867_phy_reset(struct phy_device *phydev)
 {
 	int err;
 
-	err = phy_write(phydev, DP83867_CTRL, DP83867_SW_RESTART);
+	err = phy_write(phydev, DP83867_CTRL, DP83867_SW_RESET);
 	if (err < 0)
 		return err;
 
@@ -834,6 +904,17 @@ static int dp83867_phy_reset(struct phy_device *phydev)
 
 	return phy_modify(phydev, MII_DP83867_PHYCTRL,
 			 DP83867_PHYCR_FORCE_LINK_GOOD, 0);
+}
+
+static int dp83867_phy_resume(struct phy_device *phydev)
+{
+	int err;
+
+	err = dp83867_phy_reset(phydev);
+	if (err < 0)
+		return err;
+
+	return dp83867_config_init(phydev);
 }
 
 static struct phy_driver dp83867_driver[] = {
@@ -859,7 +940,7 @@ static struct phy_driver dp83867_driver[] = {
 		.handle_interrupt = dp83867_handle_interrupt,
 
 		.suspend	= genphy_suspend,
-		.resume		= genphy_resume,
+		.resume		= dp83867_phy_resume,
 	},
 };
 module_phy_driver(dp83867_driver);

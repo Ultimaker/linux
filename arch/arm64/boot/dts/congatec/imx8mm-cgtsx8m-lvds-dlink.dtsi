@@ -1,0 +1,37 @@
+/dts-v1/;
+
+#include "imx8mm-cgtsx8m-lvds.dtsi"
+
+/ {
+        lvdspanel {
+
+                port@0 {
+			dual-lvds-odd-pixels;
+                };
+
+                port@1 {
+                        reg = <1>;
+			dual-lvds-even-pixels;
+
+                        lvds_panel1_in: endpoint {
+                                remote-endpoint = <&lvds_bridge3_out>;
+                        };
+                };
+        };
+};
+
+&i2c4 {
+	lvds-bridge@2c {
+		ports {
+                        port@3 {
+                                reg = <3>;
+
+                                lvds_bridge3_out: endpoint {
+                                        remote-endpoint = <&lvds_panel1_in>;
+                                };
+                        };
+
+		};
+	};
+};
+

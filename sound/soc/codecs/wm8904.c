@@ -26,6 +26,8 @@
 
 #include "wm8904.h"
 
+#define WM8904_PGA_BUGFIX 1 /* CGT - PGA Bugfix */
+
 enum wm8904_type {
 	WM8904,
 	WM8912,
@@ -186,6 +188,10 @@ static bool wm8904_volatile_register(struct device *dev, unsigned int reg)
 	switch (reg) {
 	case WM8904_SW_RESET_AND_ID:
 	case WM8904_REVISION:
+
+	case WM8904_BIAS_CONTROL_0:
+	case WM8904_VMID_CONTROL_0:
+
 	case WM8904_DC_SERVO_1:
 	case WM8904_DC_SERVO_6:
 	case WM8904_DC_SERVO_7:
@@ -700,6 +706,11 @@ static int out_pga_event(struct snd_soc_dapm_widget *w,
 	int timeout;
 	int pwr_reg;
 
+
+#if WM8904_PGA_BUGFIX /* ROPA PGA mute bit storage */
+	unsigned int saved_mute[4];
+#endif
+
 	/* This code is shared between HP and LINEOUT; we do all our
 	 * power management in stereo pairs to avoid latency issues so
 	 * we reuse shift to identify which rather than strcmp() the
@@ -787,6 +798,45 @@ static int out_pga_event(struct snd_soc_dapm_widget *w,
 			dev_warn(component->dev, "DC servo timed out\n");
 		else
 			dev_dbg(component->dev, "DC servo ready\n");
+
+#if WM8904_PGA_BUGFIX /* CGT - Fix PGAs volume set issue */
+			/* NOTE: wm8904 doesn't accept output PGAs volume setting when bias and CLK is off
+			 * it accepts the setting only when mute bit is set/unset (toggled) ???, Input PGAs work correctly */
+			/* read PGAs mute bit first */
+			saved_mute[0] = snd_soc_component_read(component, WM8904_ANALOGUE_OUT1_LEFT);
+			saved_mute[1] = snd_soc_component_read(component, WM8904_ANALOGUE_OUT1_RIGHT);
+			saved_mute[2] = snd_soc_component_read(component, WM8904_ANALOGUE_OUT2_LEFT);
+			saved_mute[3] = snd_soc_component_read(component, WM8904_ANALOGUE_OUT2_RIGHT);
+			/* Mute all PGAs*/
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT1_LEFT,
+					WM8904_HPOUTL_MUTE_MASK, WM8904_HPOUTL_MUTE);
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT1_RIGHT,
+					WM8904_HPOUTR_MUTE_MASK, WM8904_HPOUTR_MUTE);
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT2_LEFT,
+					WM8904_LINEOUTL_MUTE_MASK, WM8904_LINEOUTL_MUTE);
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT2_RIGHT,
+					WM8904_LINEOUTR_MUTE_MASK, WM8904_LINEOUTR_MUTE);
+	  /* NOTE: it seems that wm8904 needs to toggle mute bit to force PGA accept settings so this code
+	   * 		solves situation when Line/Headphone Volume Switch is OFF - muted */
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT1_LEFT,
+					WM8904_HPOUTL_MUTE_MASK, 0);
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT1_RIGHT,
+					WM8904_HPOUTR_MUTE_MASK, 0);
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT2_LEFT,
+					WM8904_LINEOUTL_MUTE_MASK, 0);
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT2_RIGHT,
+					WM8904_LINEOUTR_MUTE_MASK, 0);
+
+			/* Restore original value */
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT1_LEFT,
+					WM8904_HPOUTL_MUTE_MASK | WM8904_HPOUT_VU_MASK,	saved_mute[0] | WM8904_HPOUT_VU);
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT1_RIGHT,
+					WM8904_HPOUTR_MUTE_MASK | WM8904_HPOUT_VU_MASK,	saved_mute[1] | WM8904_HPOUT_VU);
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT2_LEFT,
+					WM8904_LINEOUTL_MUTE_MASK | WM8904_LINEOUT_VU_MASK,	saved_mute[2] | WM8904_LINEOUT_VU);
+			snd_soc_component_update_bits(component, WM8904_ANALOGUE_OUT2_RIGHT,
+					WM8904_LINEOUTR_MUTE_MASK | WM8904_LINEOUT_VU_MASK,	saved_mute[3] | WM8904_LINEOUT_VU);
+#endif
 
 		/* Enable the output stage */
 		snd_soc_component_update_bits(component, reg,
@@ -1903,7 +1953,12 @@ static int wm8904_set_bias_level(struct snd_soc_component *component,
 			}
 
 			regcache_cache_only(wm8904->regmap, false);
+
+
+			/* Restore Codec registers - Flush cached values */
 			regcache_sync(wm8904->regmap);
+
+			regmap_write(wm8904->regmap, WM8904_BIAS_CONTROL_0, 0x08);
 
 			/* Enable bias */
 			snd_soc_component_update_bits(component, WM8904_BIAS_CONTROL_0,
