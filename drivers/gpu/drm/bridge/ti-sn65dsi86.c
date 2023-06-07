@@ -1331,14 +1331,13 @@ static int ti_sn_bridge_connector_get_modes(struct drm_connector *connector)
 	unsigned count = 0;
 	int ret = 0;
 
-	/*ROPA: needed by DSI */
+	/* needed by DSI */
 	u32 bus_format = MEDIA_BUS_FMT_RGB888_1X24;
 
 	/* now we try to get EDID frmo display */
 	pm_runtime_get_sync(pdata->dev);
 	/* add time to setup chip */
 	if (!pdata->enabled) {
-		ti_sn65dsi86_enable_comms(pdata);
 		msleep(300);
 	}
 	/* read EDID AUX transfer */
@@ -1354,7 +1353,7 @@ static int ti_sn_bridge_connector_get_modes(struct drm_connector *connector)
 		kfree(pedid);
 	}
 
-	/*ROPA: needed by DSI */
+	/* needed by DSI */
 	connector->display_info.bus_flags = DRM_BUS_FLAG_DE_LOW |
 										DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE;
 
@@ -1419,7 +1418,6 @@ ti_sn_bridge_connector_detect(struct drm_connector *connector, bool force)
 		/* set connector status */
 		pdata->plugged = ((val & HPD_LINE_STATUS) != 0);
 
-		ti_sn65dsi86_disable_comms(pdata);
 		if (pdata->pm_suspended) {
 			// call resume anyway
 			ti_sn65dsi86_runtime_suspend(pdata->dev);
