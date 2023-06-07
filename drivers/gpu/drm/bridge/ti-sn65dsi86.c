@@ -193,6 +193,8 @@ struct ti_sn65dsi86 {
 	bool				comms_enabled;
 	struct mutex			comms_mutex;
 
+	atomic_t rpm_suspended;
+
 #ifdef SN65DSI86_DP_MODE
 	struct delayed_work mw;
 	bool plugged;
@@ -201,7 +203,6 @@ struct ti_sn65dsi86 {
 	bool 				mode_valid;
 	bool				enabled;
 	struct edid			dbg_edid;
-	bool 				pm_suspended;
 #endif
 
 #if defined(CONFIG_OF_GPIO)
@@ -751,6 +752,15 @@ static int __maybe_unused ti_sn65dsi86_runtime_resume(struct device *dev)
 	struct ti_sn65dsi86 *pdata = dev_get_drvdata(dev);
 	int ret;
 
+	if (unlikely(!atomic_read(&pdata->rpm_suspended))) {
+		DRM_WARN("Unbalanced %s!\n", __func__);
+		return 0;
+	}
+
+	if (!atomic_dec_and_test(&pdata->rpm_suspended))
+		return 0;
+
+
 	ret = regulator_bulk_enable(SN_REGULATOR_SUPPLY_NUM, pdata->supplies);
 	if (ret) {
 		DRM_ERROR("failed to enable supplies %d\n", ret);
@@ -782,6 +792,9 @@ static int __maybe_unused ti_sn65dsi86_runtime_suspend(struct device *dev)
 	struct ti_sn65dsi86 *pdata = dev_get_drvdata(dev);
 	int ret;
 
+	if (atomic_inc_return(&pdata->rpm_suspended) > 1)
+			return 0;
+
 	if (pdata->refclk)
 		ti_sn65dsi86_disable_comms(pdata);
 
@@ -796,30 +809,18 @@ static int __maybe_unused ti_sn65dsi86_runtime_suspend(struct device *dev)
 
 static int __maybe_unused ti_sn65dsi86_resume(struct device *dev)
 {
-	struct ti_sn65dsi86 *pdata = dev_get_drvdata(dev);
-
-	if (!pm_runtime_enabled(dev) || (!pm_runtime_suspended(dev) && pdata->pm_suspended)) {
-		ti_sn65dsi86_runtime_resume(dev);
-	}
-
-	return 0;
+	return ti_sn65dsi86_runtime_resume(dev);
 }
 
 static int __maybe_unused ti_sn65dsi86_suspend(struct device *dev)
 {
-	struct ti_sn65dsi86 *pdata = dev_get_drvdata(dev);
-
-	if (!pm_runtime_enabled(dev) || !pm_runtime_suspended(dev)) {
-		ti_sn65dsi86_runtime_suspend(dev);
-	}
-	pdata->pm_suspended = true;
-	return 0;
+	return ti_sn65dsi86_runtime_suspend(dev);
 }
 
 
 static const struct dev_pm_ops ti_sn65dsi86_pm_ops = {
 	SET_RUNTIME_PM_OPS(ti_sn65dsi86_runtime_suspend, ti_sn65dsi86_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(ti_sn65dsi86_suspend, ti_sn65dsi86_resume)
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(ti_sn65dsi86_suspend, ti_sn65dsi86_resume)
 };
 
 /****************************************************************************************/
@@ -1197,28 +1198,8 @@ static void ti_sn_bridge_HPD_work_handler(struct work_struct *work)
 
 	regmap_read(pdata->regmap, SN_HPDLINE_REG, &val);
 	/* update connector status */
-	if (pdata->plugged != ((val & HPD_LINE_STATUS) != 0)) {
-		/* changed */
-		pdata->plugged = (val & HPD_LINE_STATUS);
-		/* force enable or disable bridge - it seems that Wayland ignore
-		 * connector status .... */
-		if (pdata->plugged) {
-			/* plugged enable DP and train line */
-		    //ti_sn_bridge_enable(&pdata->bridge);
-			ti_sn_enable_line(pdata);
-		} else {
-			/* unplugged disable DP */
-			// ti_sn_bridge_disable(&pdata->bridge); // do not disable it will loose IRQ !!!!
-		}
-	}
-
-	// ti_sn_dbg_connector_status(pdata, true);
-
-	/* inform upper layers - will call connector detect */
-	drm_helper_hpd_irq_event(pdata->connector.dev);
-	if (pdata->plugged) {
-		drm_kms_helper_hotplug_event(pdata->connector.dev);
-	}
+	pdata->plugged = (val & HPD_LINE_STATUS);
+	drm_kms_helper_hotplug_event(pdata->connector.dev);
 
 	/*re-enable IRQ */
 	regmap_write(pdata->regmap, SN_IRQHPD_EN_REG, HPD_REMOVAL_IRQ_EN | HPD_INSERTION_IRQ_EN |
@@ -1406,10 +1387,6 @@ ti_sn_bridge_connector_detect(struct drm_connector *connector, bool force)
 		/* if not enabled - enable and read HPD */
 		pm_runtime_get_sync(pdata->dev);
 
-		if (pdata->pm_suspended) {
-			// call resume anyway
-			ti_sn65dsi86_runtime_resume(pdata->dev);
-		}
 		/* enable HPD LINE */
 		regmap_update_bits(pdata->regmap, SN_HPDLINE_REG, HPD_DISABLE, 0);
 		/* wait for debounce */
@@ -1418,10 +1395,6 @@ ti_sn_bridge_connector_detect(struct drm_connector *connector, bool force)
 		/* set connector status */
 		pdata->plugged = ((val & HPD_LINE_STATUS) != 0);
 
-		if (pdata->pm_suspended) {
-			// call resume anyway
-			ti_sn65dsi86_runtime_suspend(pdata->dev);
-		}
 		pm_runtime_put_sync(pdata->dev);
 
 		// ti_sn_dbg_connector_status(pdata, false);
@@ -1743,11 +1716,6 @@ static void ti_sn_bridge_pre_enable(struct drm_bridge *bridge)
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
 
 	pm_runtime_get_sync(pdata->dev);
-	if (pdata->pm_suspended) {
-		// call resume anyway
-		ti_sn65dsi86_runtime_resume(pdata->dev);
-		pdata->pm_suspended = false;
-	}
 
 	if (!pdata->refclk)
 		ti_sn65dsi86_enable_comms(pdata);
@@ -1922,6 +1890,8 @@ static void ti_sn_bridge_remove(struct auxiliary_device *adev)
 	}
 
 	drm_bridge_remove(&pdata->bridge);
+
+	pm_runtime_disable(pdata->dev);
 
 	of_node_put(pdata->host_node);
 }
@@ -2218,6 +2188,8 @@ static int ti_sn65dsi86_probe(struct i2c_client *client,
 	if (IS_ERR(pdata->refclk))
 		return dev_err_probe(dev, PTR_ERR(pdata->refclk),
 				     "failed to get reference clock\n");
+
+	atomic_set(&pdata->rpm_suspended, 1);
 
 	pm_runtime_enable(dev);
 	pm_runtime_set_autosuspend_delay(pdata->dev, 500);
