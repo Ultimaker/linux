@@ -1461,10 +1461,18 @@ static int
 drm_do_probe_ddc_edid(void *data, u8 *buf, unsigned int block, size_t len)
 {
 	struct i2c_adapter *adapter = data;
-	unsigned char start = block * EDID_LENGTH;
+	unsigned char address[2];  // 2-byte address
+	// unsigned char start = block * EDID_LENGTH;
 	unsigned char segment = block >> 1;
 	unsigned char xfers = segment ? 3 : 2;
 	int ret, retries = 5;
+	size_t jji, jjj = 0;
+
+	// Calculate the start address using 2 bytes
+    address[0] = (block * EDID_LENGTH) >> 8;      // High byte of the start address
+    address[1] = (block * EDID_LENGTH) & 0xFF;    // Low byte of the start address
+
+	DRM_ERROR("Calculated start address: 0x%02x%02x\n", address[0], address[1]);
 
 	/*
 	 * The core I2C driver will automatically retry the transfer if the
@@ -1483,8 +1491,8 @@ drm_do_probe_ddc_edid(void *data, u8 *buf, unsigned int block, size_t len)
 			}, {
 				.addr	= DDC_ADDR,
 				.flags	= 0,
-				.len	= 1,
-				.buf	= &start,
+				.len	= 2,
+				.buf	= address,
 			}, {
 				.addr	= DDC_ADDR,
 				.flags	= I2C_M_RD,
@@ -1506,7 +1514,24 @@ drm_do_probe_ddc_edid(void *data, u8 *buf, unsigned int block, size_t len)
 		}
 	} while (ret != xfers && --retries);
 
-	return ret == xfers ? 0 : -1;
+	if (ret == xfers) {
+		DRM_ERROR("@@@ (ERR) drm_do_probe_ddc_edid(): Read buffer contents: ");
+        // Print buffer contents in a hex dump format (16 bytes per line)
+        for (jji = 0; jji < len; jji += 16) {
+            DRM_ERROR("%04zx: ", jji); // Print the offset
+
+            // Print each byte in hexadecimal format
+            for (jjj = 0; jjj < 16 && (jji + jjj) < len; jjj++) {
+                DRM_ERROR("%02x ", buf[jji + jjj]);
+            }
+
+            DRM_ERROR("\n"); // Newline after each row of 16 bytes
+        }
+		return 0;
+	} else {
+		DRM_ERROR("@@@ (ERR) drm_do_probe_ddc_edid(): returning -1\n");
+		return -1;
+	}
 }
 
 static void connector_bad_edid(struct drm_connector *connector,
@@ -1567,6 +1592,7 @@ struct edid *drm_do_get_edid(struct drm_connector *connector,
 	/* base block fetch */
 	for (i = 0; i < 4; i++) {
 		if (get_edid_block(data, edid, 0, EDID_LENGTH))
+		// TODO: sergio: add logging to see what comes out from get_edid_block
 			goto out;
 		if (drm_edid_block_valid(edid, 0, false,
 					 &connector->edid_corrupt))
@@ -1651,9 +1677,124 @@ drm_probe_ddc(struct i2c_adapter *adapter)
 {
 	unsigned char out;
 
+	DRM_ERROR("@@@ (ERR) drm_probe_ddc(): about to probe ddc_edid\n");
 	return (drm_do_probe_ddc_edid(adapter, &out, 0, 1) == 0);
 }
 EXPORT_SYMBOL(drm_probe_ddc);
+
+void print_drm_connector_properties(struct drm_connector *connector) {
+	int i = 0;
+    if (!connector) {
+        DRM_ERROR("Connector is NULL.\n");
+        return;
+    }
+
+    DRM_ERROR("Connector Properties:\n");
+    DRM_ERROR("  Device: %p\n", connector->dev);
+    DRM_ERROR("  Kdev: %p\n", connector->kdev);
+    DRM_ERROR("  Attr: %p\n", connector->attr);
+    DRM_ERROR("  Name: %s\n", connector->name ? connector->name : "NULL");
+    DRM_ERROR("  Index: %u\n", connector->index);
+    DRM_ERROR("  Connector Type: %d\n", connector->connector_type);
+    DRM_ERROR("  Connector Type ID: %d\n", connector->connector_type_id);
+    DRM_ERROR("  Interlace Allowed: %s\n", connector->interlace_allowed ? "true" : "false");
+    DRM_ERROR("  Doublescan Allowed: %s\n", connector->doublescan_allowed ? "true" : "false");
+    DRM_ERROR("  Stereo Allowed: %s\n", connector->stereo_allowed ? "true" : "false");
+    DRM_ERROR("  YCbCr 4:2:0 Allowed: %s\n", connector->ycbcr_420_allowed ? "true" : "false");
+    DRM_ERROR("  Registered: %s\n", connector->registered ? "true" : "false");
+    DRM_ERROR("  Status: %d\n", connector->status);
+    DRM_ERROR("  EDID Blob Pointer: %p\n", connector->edid_blob_ptr);
+    DRM_ERROR("  Path Blob Pointer: %p\n", connector->path_blob_ptr);
+    DRM_ERROR("  Tile Blob Pointer: %p\n", connector->tile_blob_ptr);
+    DRM_ERROR("  Polled: 0x%x\n", connector->polled);
+    DRM_ERROR("  DPMS: %d\n", connector->dpms);
+    DRM_ERROR("  Override EDID: %s\n", connector->override_edid ? "true" : "false");
+
+    // Print the forced state of the connector
+    switch (connector->force) {
+        case DRM_FORCE_UNSPECIFIED:
+            DRM_ERROR("  Forced State: DRM_FORCE_UNSPECIFIED\n");
+            break;
+        case DRM_FORCE_OFF:
+            DRM_ERROR("  Forced State: DRM_FORCE_OFF\n");
+            break;
+        case DRM_FORCE_ON:
+            DRM_ERROR("  Forced State: DRM_FORCE_ON\n");
+            break;
+        default:
+            DRM_ERROR("  Forced State: Unknown (%d)\n", connector->force);
+            break;
+    }
+
+    DRM_ERROR("  Encoder IDs: [%u, %u, %u]\n",
+              connector->encoder_ids[0],
+              connector->encoder_ids[1],
+              connector->encoder_ids[2]);
+
+    DRM_ERROR("  ELD: ");
+    for (i = 0; i < MAX_ELD_BYTES; i++)
+        DRM_ERROR("%02x ", connector->eld[i]);
+    DRM_ERROR("\n");
+
+    DRM_ERROR("  Latency Present: [%s, %s]\n",
+              connector->latency_present[0] ? "true" : "false",
+              connector->latency_present[1] ? "true" : "false");
+
+    DRM_ERROR("  Video Latency: [%d, %d]\n",
+              connector->video_latency[0],
+              connector->video_latency[1]);
+
+    DRM_ERROR("  Audio Latency: [%d, %d]\n",
+              connector->audio_latency[0],
+              connector->audio_latency[1]);
+
+    DRM_ERROR("  Null EDID Counter: %d\n", connector->null_edid_counter);
+    DRM_ERROR("  Bad EDID Counter: %u\n", connector->bad_edid_counter);
+    DRM_ERROR("  EDID Corrupt: %s\n", connector->edid_corrupt ? "true" : "false");
+    DRM_ERROR("  Has Tile: %s\n", connector->has_tile ? "true" : "false");
+    DRM_ERROR("  Tile is Single Monitor: %s\n", connector->tile_is_single_monitor ? "true" : "false");
+    DRM_ERROR("  Number of H Tiles: %u\n", connector->num_h_tile);
+    DRM_ERROR("  Number of V Tiles: %u\n", connector->num_v_tile);
+    DRM_ERROR("  Tile H Location: %u\n", connector->tile_h_loc);
+    DRM_ERROR("  Tile V Location: %u\n", connector->tile_v_loc);
+    DRM_ERROR("  Tile H Size: %u\n", connector->tile_h_size);
+    DRM_ERROR("  Tile V Size: %u\n", connector->tile_v_size);
+
+    DRM_ERROR("  HDR Source Metadata: %p\n", connector->hdr_source_metadata);
+    DRM_ERROR("  Connector State: %p\n", connector->state);
+    DRM_ERROR("  Tile Group: %p\n", connector->tile_group);
+    DRM_ERROR("  Tile is Single Monitor: %s\n", connector->tile_is_single_monitor ? "true" : "false");
+
+    // Helper functions private data
+    DRM_ERROR("  Helper Private: %p\n", connector->helper_private);
+}
+
+void print_i2c_adapter_properties(struct i2c_adapter *adapter) {
+    if (!adapter) {
+        DRM_ERROR("I2C adapter is NULL.\n");
+        return;
+    }
+
+    DRM_ERROR("I2C Adapter Properties:\n");
+    DRM_ERROR("  Owner: %p\n", adapter->owner);
+    DRM_ERROR("  Class: 0x%x\n", adapter->class);
+    DRM_ERROR("  Algorithm: %p\n", adapter->algo);
+    DRM_ERROR("  Algorithm Data: %p\n", adapter->algo_data);
+    DRM_ERROR("  Lock Operations: %p\n", adapter->lock_ops);
+    DRM_ERROR("  Bus Lock: %p\n", &adapter->bus_lock);
+    DRM_ERROR("  Mux Lock: %p\n", &adapter->mux_lock);
+    DRM_ERROR("  Timeout: %d (in jiffies)\n", adapter->timeout);
+    DRM_ERROR("  Retries: %d\n", adapter->retries);
+    DRM_ERROR("  Device: %p\n", &adapter->dev);
+    DRM_ERROR("  Adapter Number: %d\n", adapter->nr);
+    DRM_ERROR("  Name: %s\n", adapter->name);
+    DRM_ERROR("  Device Released Completion: %p\n", &adapter->dev_released);
+    DRM_ERROR("  Userspace Clients Lock: %p\n", &adapter->userspace_clients_lock);
+    DRM_ERROR("  Userspace Clients List: %p\n", &adapter->userspace_clients);
+    DRM_ERROR("  Bus Recovery Info: %p\n", adapter->bus_recovery_info);
+    DRM_ERROR("  Quirks: %p\n", adapter->quirks);
+    DRM_ERROR("  Host Notify Domain: %p\n", adapter->host_notify_domain);
+}
 
 /**
  * drm_get_edid - get EDID data, if available
@@ -1670,15 +1811,21 @@ struct edid *drm_get_edid(struct drm_connector *connector,
 {
 	struct edid *edid;
 
+	print_drm_connector_properties(connector);
+	print_i2c_adapter_properties(adapter);
+
 	if (connector->force == DRM_FORCE_OFF)
 		return NULL;
 
 	if (connector->force == DRM_FORCE_UNSPECIFIED && !drm_probe_ddc(adapter))
 		return NULL;
 
+	DRM_ERROR("@@@ (ERR) drm_get_edid(): Going to get edid and probe ddc\n");
 	edid = drm_do_get_edid(connector, drm_do_probe_ddc_edid, adapter);
-	if (edid)
+	if (edid) {
+		DRM_ERROR("@@@ (ERR) drm_get_edid(): Got an edid? getting displayid\n");
 		drm_get_displayid(connector, edid);
+	}
 	return edid;
 }
 EXPORT_SYMBOL(drm_get_edid);

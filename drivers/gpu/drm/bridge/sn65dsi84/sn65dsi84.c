@@ -349,8 +349,8 @@ static int sn65dsi84_get_modes(struct sn65dsi84 *sn65dsi84,
 	DRM_DEBUG("EDID sn65dsi84 is valid return = %d\n",drm_edid_header_is_valid((u8 *)(sn65dsi84->edid)));
 
 
-	drm_mode_connector_update_edid_property(connector, (sn65dsi84->edid));
-	count = drm_add_edid_modes(connector, (sn65dsi84->edid));
+	// drm_mode_connector_update_edid_property(connector, (sn65dsi84->edid));
+	// count = drm_add_edid_modes(connector, (sn65dsi84->edid));
 
     if (sn65dsi84->i2c_edid) {
         DRM_DEBUG("sn65: get_modes(): i2c EDID configured, downloading EDID data\n");
@@ -367,6 +367,11 @@ static int sn65dsi84_get_modes(struct sn65dsi84 *sn65dsi84,
 
 
 init_drm:
+
+	drm_mode_connector_update_edid_property(connector, (sn65dsi84->edid));
+	DRM_INFO("sn65: get_modes(): @@@ going to try to add edid modes\n");
+	count = drm_add_edid_modes(connector, (sn65dsi84->edid));
+	DRM_INFO("sn65: get_modes(): @@@ already tried to add edid modes\n");
 
 
 #ifdef SN65DSI84_DBGPRN
