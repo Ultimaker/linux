@@ -47,6 +47,11 @@ properties:
   interrupts:
     maxItems: 1
 
+  poll-interval:
+    description: Poll interval time in milliseconds, only relevant if no
+                 interrupt was provided.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
   reset-gpios:
     maxItems: 1
 
@@ -99,7 +104,7 @@ additionalProperties: false
 required:
   - compatible
   - reg
-  - interrupts
+  - interrupts or poll-interval
 
 examples:
   - |
