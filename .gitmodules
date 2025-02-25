@@ -1,3 +1,3 @@
 [submodule "drivers/net/wireless/realtek/rtl8822ce"]
 	path = drivers/net/wireless/realtek/rtl8822ce
-	url = git@github.com:Ultimaker/rtl8822ce.git
+	url = https://github.com/Ultimaker/rtl8822ce.git
