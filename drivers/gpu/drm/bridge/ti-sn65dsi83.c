@@ -23,6 +23,10 @@
  * Based on previous work of:
  * Valentin Raevsky <valentin@compulab.co.il>
  * Philippe Schenker <philippe.schenker@toradex.com>
+ *
+ * Changes to support the bridge on conga-SMX8-Mini
+ * Copyright (C) 2022-2025 congatec GmbH
+ * Author: Lukas Posadka <lukas.posadka@congatec.com>
  */
 
 #include <linux/bits.h>
@@ -141,10 +145,13 @@ struct sn65dsi83 {
 	struct drm_bridge		bridge;
 	struct device			*dev;
 	struct regmap			*regmap;
+	struct device_node		*host_node;
 	struct mipi_dsi_device		*dsi;
 	struct drm_bridge		*panel_bridge;
 	struct gpio_desc		*enable_gpio;
 	struct regulator		*vcc;
+	int				dsi_lanes;
+	unsigned int			dsi_freq;
 	bool				lvds_dual_link;
 	bool				lvds_dual_link_even_odd_swap;
 };
@@ -246,6 +253,42 @@ static int sn65dsi83_attach(struct drm_bridge *bridge,
 			    enum drm_bridge_attach_flags flags)
 {
 	struct sn65dsi83 *ctx = bridge_to_sn65dsi83(bridge);
+	struct device *dev = ctx->dev;
+	struct mipi_dsi_device *dsi;
+	struct mipi_dsi_host *host;
+	int ret = 0;
+
+	const struct mipi_dsi_device_info info = {
+		.type = "sn65dsi83",
+		.channel = 0,
+		.node = NULL,
+	};
+
+	host = of_find_mipi_dsi_host_by_node(ctx->host_node);
+	if (!host) {
+		dev_err(dev, "failed to find dsi host\n");
+		return -EPROBE_DEFER;
+	}
+
+
+	dsi = devm_mipi_dsi_device_register_full(dev, host, &info);
+	if (IS_ERR(dsi))
+		return dev_err_probe(dev, PTR_ERR(dsi), "failed to create dsi device\n");
+
+	ctx->dsi = dsi;
+
+	dsi->lanes = ctx->dsi_lanes;
+	dsi->format = MIPI_DSI_FMT_RGB888;
+	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_SYNC_PULSE |
+			  MIPI_DSI_MODE_VIDEO_NO_HFP | MIPI_DSI_MODE_VIDEO_AUTO_VERT;
+
+	ctx->dsi_freq = 0;
+	dsi->export_dsi_freq = &(ctx->dsi_freq);
+	ret = devm_mipi_dsi_attach(dev, dsi);
+	if (ret < 0) {
+		dev_err(dev, "failed to attach dsi to host: %d\n", ret);
+		return ret;
+	}
 
 	return drm_bridge_attach(bridge->encoder, ctx->panel_bridge,
 				 &ctx->bridge, flags);
@@ -259,6 +302,23 @@ static void sn65dsi83_detach(struct drm_bridge *bridge)
 		return;
 
 	ctx->dsi = NULL;
+}
+
+static u8 sn65dsi83_get_dsi_div(struct sn65dsi83 *ctx, const struct drm_display_mode *mode)
+{
+	unsigned int pixdiv, pix_freq;
+	unsigned int sndiv = 25; /* MAX_DSI_DIVIDER */
+
+	pixdiv = DIV_ROUND_CLOSEST(594000, mode->clock);
+	pix_freq = 594000 / pixdiv;
+
+	while (((ctx->dsi_freq / sndiv) < pix_freq) && (sndiv > 0))
+		sndiv--;
+
+	if (ctx->lvds_dual_link)
+		sndiv<<=1;
+
+	return sndiv;
 }
 
 static u8 sn65dsi83_get_lvds_range(struct sn65dsi83 *ctx,
@@ -278,12 +338,9 @@ static u8 sn65dsi83_get_lvds_range(struct sn65dsi83 *ctx,
 	 * the clock to 25..154 MHz, the range calculation can be simplified
 	 * as follows:
 	 */
-	int mode_clock = mode->clock;
+	unsigned int lvdsclock_khz = ctx->dsi_freq / sn65dsi83_get_dsi_div(ctx, mode);
 
-	if (ctx->lvds_dual_link)
-		mode_clock /= 2;
-
-	return (mode_clock - 12500) / 25000;
+	return (lvdsclock_khz - 12500) / 25000;
 }
 
 static u8 sn65dsi83_get_dsi_range(struct sn65dsi83 *ctx,
@@ -303,25 +360,27 @@ static u8 sn65dsi83_get_dsi_range(struct sn65dsi83 *ctx,
 	 *  DSI_CLK = mode clock * bpp / dsi_data_lanes / 2
 	 * the 2 is there because the bus is DDR.
 	 */
-	return DIV_ROUND_UP(clamp((unsigned int)mode->clock *
-			    mipi_dsi_pixel_format_to_bpp(ctx->dsi->format) /
-			    ctx->dsi->lanes / 2, 40000U, 500000U), 5000U);
-}
 
-static u8 sn65dsi83_get_dsi_div(struct sn65dsi83 *ctx)
-{
-	/* The divider is (DSI_CLK / LVDS_CLK) - 1, which really is: */
-	unsigned int dsi_div = mipi_dsi_pixel_format_to_bpp(ctx->dsi->format);
-
-	dsi_div /= ctx->dsi->lanes;
-
-	if (!ctx->lvds_dual_link)
-		dsi_div /= 2;
-
-	return dsi_div - 1;
+	return ctx->dsi_freq / 5000U;
 }
 
 static void sn65dsi83_atomic_pre_enable(struct drm_bridge *bridge,
+					struct drm_bridge_state *old_bridge_state)
+{
+	struct sn65dsi83 *ctx = bridge_to_sn65dsi83(bridge);
+
+	/*
+	 * Reset the chip, pull EN line low for t_reset=10ms,
+	 * then high for t_en=1ms.
+	 */
+	regcache_mark_dirty(ctx->regmap);
+	gpiod_set_value(ctx->enable_gpio, 0);
+	usleep_range(10000, 11000);
+	gpiod_set_value(ctx->enable_gpio, 1);
+	usleep_range(1000, 1100);
+}
+
+static void sn65dsi83_atomic_enable(struct drm_bridge *bridge,
 					struct drm_bridge_state *old_bridge_state)
 {
 	struct sn65dsi83 *ctx = bridge_to_sn65dsi83(bridge);
@@ -399,7 +458,7 @@ static void sn65dsi83_atomic_pre_enable(struct drm_bridge *bridge,
 	regmap_write(ctx->regmap, REG_DSI_CLK,
 		     REG_DSI_CLK_CHA_DSI_CLK_RANGE(sn65dsi83_get_dsi_range(ctx, mode)));
 	regmap_write(ctx->regmap, REG_RC_DSI_CLK,
-		     REG_RC_DSI_CLK_DSI_CLK_DIVIDER(sn65dsi83_get_dsi_div(ctx)));
+		     REG_RC_DSI_CLK_DSI_CLK_DIVIDER(sn65dsi83_get_dsi_div(ctx, mode) - 1 ));
 
 	/* Set number of DSI lanes and LVDS link config. */
 	regmap_write(ctx->regmap, REG_DSI_LANE,
@@ -452,14 +511,20 @@ static void sn65dsi83_atomic_pre_enable(struct drm_bridge *bridge,
 	/* 32 + 1 pixel clock to ensure proper operation */
 	le16val = cpu_to_le16(32 + 1);
 	regmap_bulk_write(ctx->regmap, REG_VID_CHA_SYNC_DELAY_LOW, &le16val, 2);
-	le16val = cpu_to_le16(mode->hsync_end - mode->hsync_start);
+	le16val = cpu_to_le16( ctx->lvds_dual_link
+			? ((mode->hsync_end - mode->hsync_start) >> 1)
+			: (mode->hsync_end - mode->hsync_start)
+			  );
 	regmap_bulk_write(ctx->regmap, REG_VID_CHA_HSYNC_PULSE_WIDTH_LOW,
 			  &le16val, 2);
 	le16val = cpu_to_le16(mode->vsync_end - mode->vsync_start);
 	regmap_bulk_write(ctx->regmap, REG_VID_CHA_VSYNC_PULSE_WIDTH_LOW,
 			  &le16val, 2);
 	regmap_write(ctx->regmap, REG_VID_CHA_HORIZONTAL_BACK_PORCH,
-		     mode->htotal - mode->hsync_end);
+					ctx->lvds_dual_link
+					? (mode->htotal - mode->hsync_end) >> 1
+					: (mode->htotal - mode->hsync_end)
+				  );
 	regmap_write(ctx->regmap, REG_VID_CHA_VERTICAL_BACK_PORCH,
 		     mode->vtotal - mode->vsync_end);
 	regmap_write(ctx->regmap, REG_VID_CHA_HORIZONTAL_FRONT_PORCH,
@@ -489,22 +554,6 @@ static void sn65dsi83_atomic_pre_enable(struct drm_bridge *bridge,
 	usleep_range(10000, 12000);
 }
 
-static void sn65dsi83_atomic_enable(struct drm_bridge *bridge,
-				    struct drm_bridge_state *old_bridge_state)
-{
-	struct sn65dsi83 *ctx = bridge_to_sn65dsi83(bridge);
-	unsigned int pval;
-
-	/* Clear all errors that got asserted during initialization. */
-	regmap_read(ctx->regmap, REG_IRQ_STAT, &pval);
-	regmap_write(ctx->regmap, REG_IRQ_STAT, pval);
-
-	/* Wait for 1ms and check for errors in status register */
-	usleep_range(1000, 1100);
-	regmap_read(ctx->regmap, REG_IRQ_STAT, &pval);
-	if (pval)
-		dev_err(ctx->dev, "Unexpected link status 0x%02x\n", pval);
-}
 
 static void sn65dsi83_atomic_disable(struct drm_bridge *bridge,
 				     struct drm_bridge_state *old_bridge_state)
@@ -581,6 +630,17 @@ static int sn65dsi83_parse_dt(struct sn65dsi83 *ctx, enum sn65dsi83_model model)
 {
 	struct drm_bridge *panel_bridge;
 	struct device *dev = ctx->dev;
+	struct device_node *endpoint;
+
+	endpoint = of_graph_get_endpoint_by_regs(dev->of_node, 0, -1);
+	ctx->dsi_lanes = drm_of_get_data_lanes_count(endpoint, 1, 4);
+	ctx->host_node = of_graph_get_remote_port_parent(endpoint);
+	of_node_put(endpoint);
+
+	if (ctx->dsi_lanes < 0 || ctx->dsi_lanes > 4)
+		return -EINVAL;
+	if (!ctx->host_node)
+		return -ENODEV;
 
 	ctx->lvds_dual_link = false;
 	ctx->lvds_dual_link_even_odd_swap = false;
@@ -615,55 +675,6 @@ static int sn65dsi83_parse_dt(struct sn65dsi83 *ctx, enum sn65dsi83_model model)
 	if (IS_ERR(ctx->vcc))
 		return dev_err_probe(dev, PTR_ERR(ctx->vcc),
 				     "Failed to get supply 'vcc'\n");
-
-	return 0;
-}
-
-static int sn65dsi83_host_attach(struct sn65dsi83 *ctx)
-{
-	struct device *dev = ctx->dev;
-	struct device_node *host_node;
-	struct device_node *endpoint;
-	struct mipi_dsi_device *dsi;
-	struct mipi_dsi_host *host;
-	const struct mipi_dsi_device_info info = {
-		.type = "sn65dsi83",
-		.channel = 0,
-		.node = NULL,
-	};
-	int dsi_lanes, ret;
-
-	endpoint = of_graph_get_endpoint_by_regs(dev->of_node, 0, -1);
-	dsi_lanes = drm_of_get_data_lanes_count(endpoint, 1, 4);
-	host_node = of_graph_get_remote_port_parent(endpoint);
-	host = of_find_mipi_dsi_host_by_node(host_node);
-	of_node_put(host_node);
-	of_node_put(endpoint);
-
-	if (!host)
-		return -EPROBE_DEFER;
-
-	if (dsi_lanes < 0)
-		return dsi_lanes;
-
-	dsi = devm_mipi_dsi_device_register_full(dev, host, &info);
-	if (IS_ERR(dsi))
-		return dev_err_probe(dev, PTR_ERR(dsi),
-				     "failed to create dsi device\n");
-
-	ctx->dsi = dsi;
-
-	dsi->lanes = dsi_lanes;
-	dsi->format = MIPI_DSI_FMT_RGB888;
-	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
-			  MIPI_DSI_MODE_VIDEO_NO_HFP | MIPI_DSI_MODE_VIDEO_NO_HBP |
-			  MIPI_DSI_MODE_VIDEO_NO_HSA | MIPI_DSI_MODE_NO_EOT_PACKET;
-
-	ret = devm_mipi_dsi_attach(dev, dsi);
-	if (ret < 0) {
-		dev_err(dev, "failed to attach dsi to host: %d\n", ret);
-		return ret;
-	}
 
 	return 0;
 }
@@ -713,17 +724,7 @@ static int sn65dsi83_probe(struct i2c_client *client)
 	ctx->bridge.pre_enable_prev_first = true;
 	drm_bridge_add(&ctx->bridge);
 
-	ret = sn65dsi83_host_attach(ctx);
-	if (ret) {
-		dev_err_probe(dev, ret, "failed to attach DSI host\n");
-		goto err_remove_bridge;
-	}
-
 	return 0;
-
-err_remove_bridge:
-	drm_bridge_remove(&ctx->bridge);
-	return ret;
 }
 
 static void sn65dsi83_remove(struct i2c_client *client)
