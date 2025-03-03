@@ -195,6 +195,7 @@ struct mipi_dsi_device {
 	unsigned long hs_rate;
 	unsigned long lp_rate;
 	struct drm_dsc_config *dsc;
+	unsigned int * export_dsi_freq;
 };
 
 #define MIPI_DSI_MODULE_PREFIX "mipi-dsi:"
