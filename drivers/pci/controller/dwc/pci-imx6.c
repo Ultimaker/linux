@@ -1740,6 +1740,10 @@ static int imx6_pcie_suspend_noirq(struct device *dev)
 				   IMX6Q_GPR1_PCIE_TEST_PD);
 	} else {
 		imx6_pcie_msi_save_restore(imx6_pcie, true);
+		if (gpio_is_valid(imx6_pcie->reset_gpio))
+			gpio_set_value_cansleep(imx6_pcie->reset_gpio,
+									imx6_pcie->gpio_active_high
+									);
 		imx6_pcie_pm_turnoff(imx6_pcie);
 		imx6_pcie_stop_link(imx6_pcie->pci);
 		imx6_pcie_host_exit(pp);
