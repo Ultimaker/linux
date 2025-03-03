@@ -159,6 +159,14 @@
 #define DP83867_LED_DRV_EN(x)	BIT((x) * 4)
 #define DP83867_LED_DRV_VAL(x)	BIT((x) * 4 + 1)
 
+/* LEDCR1 fields */
+#define DP83867_LEDCR1_LED_0_SEL_MASK		GENMASK(3, 0)
+#define DP83867_LEDCR1_LED_0_SEL_SHIFT		0
+#define DP83867_LEDCR1_LED_1_SEL_MASK		GENMASK(7, 4)
+#define DP83867_LEDCR1_LED_1_SEL_SHIFT		4
+#define DP83867_LEDCR1_LED_2_SEL_MASK		GENMASK(11, 8)
+#define DP83867_LEDCR1_LED_2_SEL_SHIFT		8
+
 enum {
 	DP83867_PORT_MIRROING_KEEP,
 	DP83867_PORT_MIRROING_EN,
@@ -176,6 +184,9 @@ struct dp83867_private {
 	bool set_clk_output;
 	u32 clk_output_sel;
 	bool sgmii_ref_clk_en;
+	int led_0_sel;
+	int led_1_sel;
+	int led_2_sel;
 };
 
 static int dp83867_ack_interrupt(struct phy_device *phydev)
@@ -655,6 +666,24 @@ static int dp83867_of_init(struct phy_device *phydev)
 		return -EINVAL;
 	}
 
+	ret = of_property_read_u32(of_node, "ti,led_0_sel",
+				   &dp83867->led_0_sel);
+	/* If not set, keep default */
+	if (ret < 0)
+		dp83867->led_0_sel = -1;
+
+	ret = of_property_read_u32(of_node, "ti,led_1_sel",
+				   &dp83867->led_1_sel);
+	/* If not set, keep default */
+	if (ret < 0)
+		dp83867->led_1_sel = -1;
+
+	ret = of_property_read_u32(of_node, "ti,led_2_sel",
+				   &dp83867->led_2_sel);
+	/* If not set, keep default */
+	if (ret < 0)
+		dp83867->led_2_sel = -1;
+
 	ret = of_property_read_u32(of_node, "rx-fifo-depth",
 				   &dp83867->rx_fifo_depth);
 	if (ret)
@@ -927,6 +956,27 @@ static int dp83867_config_init(struct phy_device *phydev)
 
 		phy_modify_mmd(phydev, DP83867_DEVADDR, DP83867_IO_MUX_CFG,
 			       mask, val);
+	}
+
+	if ((dp83867->led_0_sel + dp83867->led_1_sel + dp83867->led_2_sel) != -3 ) {
+		val = phy_read(phydev, DP83867_LEDCR1);
+
+		if (dp83867->led_0_sel != -1) {
+			val &= ~DP83867_LEDCR1_LED_0_SEL_MASK;
+			val |= dp83867->led_0_sel << DP83867_LEDCR1_LED_0_SEL_SHIFT;
+		}
+
+		if (dp83867->led_1_sel != -1) {
+			val &= ~DP83867_LEDCR1_LED_1_SEL_MASK;
+			val |= dp83867->led_1_sel << DP83867_LEDCR1_LED_1_SEL_SHIFT;
+		}
+
+		if (dp83867->led_2_sel != -1) {
+			val &= ~DP83867_LEDCR1_LED_2_SEL_MASK;
+			val |= dp83867->led_2_sel << DP83867_LEDCR1_LED_2_SEL_SHIFT;
+		}
+
+		phy_write(phydev, DP83867_LEDCR1, val);
 	}
 
 	return 0;
