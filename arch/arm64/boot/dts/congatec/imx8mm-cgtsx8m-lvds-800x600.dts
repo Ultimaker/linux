@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (C) 2025 congatec GmbH
+ * Author: Lukas Posadka <lukas.posadka@congatec.com>
+ */
+
+/dts-v1/;
+
+#include "imx8mm-cgtsx8m-lvds.dtsi"
+
+/ {
+	panel-lvds {
+		width-mm = <249>;
+		height-mm = <188>;
+
+		data-mapping = "vesa-24";
+
+		panel-timing {
+			clock-frequency = <40000000>;
+			hactive = <800>;
+			vactive = <600>;
+			hsync-len = <128>;
+			hfront-porch = <40>;
+			hback-porch = <88>;
+			vsync-len = <4>;
+			vfront-porch = <1>;
+			vback-porch = <23>;
+		};
+	};
+};
+
