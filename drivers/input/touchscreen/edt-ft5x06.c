@@ -139,6 +139,7 @@ struct edt_ft5x06_ts_data {
 	u8 tdata_cmd;
 	int tdata_len;
 	int tdata_offset;
+    unsigned int known_ids;
 
 	char name[EDT_NAME_LEN];
 	char fw_version[EDT_NAME_LEN];
@@ -302,7 +303,10 @@ static void edt_ft5x06_process(struct edt_ft5x06_ts_data *tsdata)
 	u8 rdbuf[63];
 	int i, type, x, y, id;
 	int error;
-
+	unsigned int active_ids = 0, known_ids = tsdata->known_ids;
+	long released_ids;
+	int b = 0;
+    
 	memset(rdbuf, 0, sizeof(rdbuf));
 	error = regmap_bulk_read(tsdata->regmap, tsdata->tdata_cmd, rdbuf,
 				 tsdata->tdata_len);
@@ -334,10 +338,25 @@ static void edt_ft5x06_process(struct edt_ft5x06_ts_data *tsdata)
 
 		input_mt_slot(tsdata->input, id);
 		if (input_mt_report_slot_state(tsdata->input, MT_TOOL_FINGER,
-					       type != TOUCH_EVENT_UP))
+					       type != TOUCH_EVENT_UP)) {
 			touchscreen_report_pos(tsdata->input, &tsdata->prop,
 					       x, y, true);
+			active_ids |= BIT(id);
+		} else {
+			known_ids &= ~BIT(id);
+		}
 	}
+
+	/* One issue with the device is the TOUCH_UP message is not always
+	 * returned. Instead track which ids we know about and report when they
+	 * are no longer updated
+	 */
+	released_ids = known_ids & ~active_ids;
+	for_each_set_bit_from(b, &released_ids, tsdata->max_support_points) {
+		input_mt_slot(tsdata->input, b);
+		input_mt_report_slot_inactive(tsdata->input);
+	}
+	tsdata->known_ids = active_ids;
 
 	input_mt_report_pointer_emulation(tsdata->input, true);
 	input_sync(tsdata->input);
