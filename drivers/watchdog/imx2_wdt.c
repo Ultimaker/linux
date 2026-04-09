@@ -47,7 +47,9 @@
 #define IMX2_WDT_SEQ2		0xAAAA		/* -> service sequence 2 */
 
 #define IMX2_WDT_WRSR		0x04		/* Reset Status Register */
+#define IMX2_WDT_WRSR_SFTW	BIT(0)		/* -> Reset due to Software */
 #define IMX2_WDT_WRSR_TOUT	BIT(1)		/* -> Reset due to Timeout */
+#define IMX2_WDT_WRSR_POR	BIT(4)		/* -> Reset due to Power-on */
 
 #define IMX2_WDT_WICR		0x06		/* Interrupt Control Register */
 #define IMX2_WDT_WICR_WIE	BIT(15)		/* -> Interrupt Enable */
@@ -322,6 +324,7 @@ static int __init imx2_wdt_probe(struct platform_device *pdev)
 
 	regmap_read(wdev->regmap, IMX2_WDT_WRSR, &val);
 	wdog->bootstatus = val & IMX2_WDT_WRSR_TOUT ? WDIOF_CARDRESET : 0;
+	wdog->bootstatus |= val & IMX2_WDT_WRSR_POR ? WDIOF_POWERUNDER : 0;
 
 	wdev->ext_reset = of_property_read_bool(dev->of_node,
 						"fsl,ext-reset-output");
