@@ -429,7 +429,7 @@ static int vc4_drm_bind(struct device *dev)
 	if (ret < 0)
 		goto err;
 
-	drm_client_setup_with_fourcc(drm, DRM_FORMAT_RGB565);
+	drm_client_setup_with_fourcc(drm, DRM_FORMAT_XRGB8888);
 
 	return 0;
 
